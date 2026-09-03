@@ -3,6 +3,8 @@ name = "dyprys"
 version = "0.1.0"
 description = "Semantic search across a personal library of book-length texts"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Mendel Cyprys", email = "erikmanhem@gmail.com" }]
 dependencies = [
     # The embedding model runs locally through llama.cpp against a GGUF file.
     "llama-cpp-python>=0.3",
