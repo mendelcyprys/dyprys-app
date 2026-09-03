@@ -317,11 +317,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="'all', a number, or a date like 2026-08-01 to drop "
                          "everything older")
     ak.add_argument("--yes", action="store_true", help="confirm a --forget")
+    ak.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
 
     hi = sub.add_parser("history",
                         help="what has been done to this index, and what embedding cost")
     hi.add_argument("-n", "--limit", type=int, default=15, metavar="N",
                     help="how many of the most recent to show (default 15)")
+    hi.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
     wa = sub.add_parser("watch", help="follow an embedding run already in progress")
     wa.add_argument("--every", type=float, default=2.0, metavar="SECONDS",
                     help="how often to refresh (default 2)")
@@ -378,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "add":
             return _add(conn, args)
         if args.command == "history":
-            return _history(conn, args.limit)
+            return _history(conn, args.limit, args.json)
         if args.command == "asked":
             return _asked(conn, args)
         if args.command == "watch":
@@ -1092,6 +1094,21 @@ def _asked(conn, args) -> int:
     """What was asked before, and what it produced."""
     import json
 
+    def as_row(row):
+        return {"id": row["id"], "at": row["at"], "question": row["question"],
+                "mode": row["mode"], "ms": row["ms"],
+                "detail": json.loads(row["detail"])}
+
+    if getattr(args, "json", False) and not args.forget:
+        # A read of the question log, so --forget (which writes) is not a --json
+        # operation. One question if numbered, else the list.
+        allrows = db.questions_asked(conn, limit=10 ** 9)
+        if args.which is not None:
+            one = next((r for r in allrows if r["id"] == args.which), None)
+            return _emit_json(as_row(one)) if one else (_emit_json(None) or 1)
+        rows = db.questions_asked(conn, args.limit, args.find)
+        return _emit_json({"questions": [as_row(r) for r in rows]})
+
     if args.forget:
         what = args.forget.lower()
         if what == "all":
@@ -1176,20 +1193,42 @@ def _asked(conn, args) -> int:
     return 0
 
 
-def _history(conn, limit: int) -> int:
+def _history(conn, limit: int, as_json: bool = False) -> int:
     """What has been done to this index, and what embedding it cost."""
     events = conn.execute(
         "SELECT at, action, detail FROM events ORDER BY id DESC LIMIT ?",
         (limit,)).fetchall()
+    runs = conn.execute(
+        "SELECT r.*, m.name FROM embed_runs r JOIN models m ON m.id = r.model_id "
+        "ORDER BY r.id DESC LIMIT ?", (limit,)).fetchall()
+
+    if as_json:
+        total = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(seconds),0), COALESCE(SUM(embedded),0) "
+            "FROM embed_runs").fetchone()
+        return _emit_json({
+            "events": [
+                {"at": e["at"], "action": e["action"], "detail": e["detail"]}
+                for e in reversed(events)],
+            "runs": [
+                {"started_at": r["started_at"], "seconds": r["seconds"],
+                 "wall_seconds": (r["wall_seconds"] if "wall_seconds" in r.keys() else None),
+                 "embedded": r["embedded"], "copied": r["copied"], "failed": r["failed"],
+                 "rate": (r["embedded"] / r["seconds"]) if r["seconds"] else 0.0,
+                 "stopped": r["stopped"], "model": r["name"],
+                 "asleep_seconds": _asleep(r)}
+                for r in reversed(runs)],
+            "totals": {"runs": total[0], "seconds": total[1], "chunks": total[2],
+                       "mean_rate": (total[2] / total[1]) if total[1] else 0.0},
+        })
+
     if events:
         print(f"what has been done to this index (most recent {len(events)})")
         for e in reversed(events):
             print(f"  {_local(e['at']):<20} {_ago(e['at']):>9}  {e['action']:<9} {e['detail']}")
         print()
 
-    rows = conn.execute(
-        "SELECT r.*, m.name FROM embed_runs r JOIN models m ON m.id = r.model_id "
-        "ORDER BY r.id DESC LIMIT ?", (limit,)).fetchall()
+    rows = runs
     if not rows:
         sys.stdout.flush()          # or the note lands above the events
         print("no embedding runs recorded yet — `dyp embed` records each one when it stops.",

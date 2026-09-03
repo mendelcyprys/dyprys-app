@@ -140,14 +140,17 @@ in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
 ## Getting the machine-readable form
 
 Parse `--json`, don't scrape the pretty output (it carries ANSI codes and
-middle-elided titles). Available on `ask` **and on the inspection commands** —
-`status`, `check`, `books`, `models`, `library list` — so you can drive both
-searching and administration structurally:
+middle-elided titles). Available on `ask` **and on every read-only command** —
+`status`, `check`, `books`, `models`, `library list`, `history`, `asked` — so you
+can drive both searching and administration structurally:
 
 - `dyp status --json` → is it embedded, and how far? (`.models[].coverage`)
 - `dyp check --json` → anything drifted? (`.drift.clean`, `.models[].outstanding`)
 - `dyp books --json` / `dyp models --json` → what is here, per-book / per-model
 - `dyp library list --json` → the libraries, sizes and defaults
+- `dyp history --json` → embed runs (rate, how each ended) and index operations
+- `dyp asked --json` → what this library was already asked and what came back
+  (`dyp asked N --json` for one in full) — cross-session memory of prior searches
 
 `dyp ask "…" --json` returns each result as
 `{rank, chunk_id, book, chapter, path, offset, cos, provenance, state, text}`.

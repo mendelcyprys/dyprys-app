@@ -633,3 +633,25 @@ def test_models_json_with_no_model_is_empty_and_missing(tmp_path, capsys):
     code, models = _run_capturing(["--data", data, "models", "--json"], capsys)
     assert code == 1
     assert models == {"models": []}
+
+
+def test_history_and_asked_emit_valid_json(tmp_path, capsys):
+    """The two log commands round out the --json set; on a fresh index they are
+    valid JSON with empty collections rather than a human 'nothing yet' message."""
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("Para about neurons. " * 200, encoding="utf-8")
+    data = str(tmp_path / "ix")
+    main(["--data", data, "add", str(book)])
+
+    code, hist = _run_capturing(["--data", data, "history", "--json"], capsys)
+    assert code == 0
+    assert hist["runs"] == []                                   # nothing embedded yet
+    assert hist["totals"]["chunks"] == 0
+    # ...but the add itself is a recorded index operation
+    assert any(e["action"] == "add" for e in hist["events"])
+
+    code, asked = _run_capturing(["--data", data, "asked", "--json"], capsys)
+    assert code == 0
+    assert asked == {"questions": []}
