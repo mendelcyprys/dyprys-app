@@ -42,6 +42,11 @@ by default for that reason.
 odd spelling). It bridges vocabulary, and a rare token has no vocabulary to
 bridge — it only adds noise.
 
+**Do not stack `--expand` and `--rerank`.** Measured, they are substitutes, not
+complements: together they recover the same answers as the better one alone, at
+the sum of the costs. Pick one — reranking finds a few more answers, expansion is
+several times faster.
+
 ---
 
 ## Reading a result
