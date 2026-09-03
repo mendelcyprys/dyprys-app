@@ -277,6 +277,7 @@ src/dyprys/
   cli.py         `dyp` resolves to dyprys.cli:main
 tests/           pytest — 577 tests
 CLAUDE.md        the operator's decision manual, loaded by an agent
+docs/            deeper operational reference, linked on-demand from CLAUDE.md
 ```
 
 **The split is by I/O, not by topic** — the pure functions (chunking, fusion,

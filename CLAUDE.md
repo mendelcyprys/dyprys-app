@@ -5,9 +5,11 @@ book-length texts. Your job is to **find the passage that answers what the user
 asked and return it to them** — not a list of books, the passage itself, with
 where it came from.
 
-This file tells you *which search to run when*. For exact flags, `dyp COMMAND -h`.
-For why any of it is true, that reasoning lives in the sibling `cyprys` repo; you
-do not need it to operate well.
+This file is loaded every session and kept short: it tells you *which search to
+run when*. For exact flag syntax, `dyp COMMAND -h`. For fuller detail on anything
+below — the complete flag list, the `--json` schema, what a specific error means,
+how to choose an embed model — the `docs/` pages listed at the end go deeper; read
+one only when a task needs it.
 
 ---
 
@@ -67,6 +69,10 @@ several times faster.
 
 When you need the data rather than the display, use `--json` (see below).
 
+→ **`docs/searching.md`** — the full flag list, the `--json` schema, `--summarise`
+trust rules, and how to reason about a search that returns nothing or the wrong
+passage.
+
 ---
 
 ## Administering a library
@@ -97,6 +103,10 @@ drifted, what work is outstanding — never changes anything), `dyp books` (what
 in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
 `lexical` as needed.
 
+→ **`docs/indexing.md`** (add, embed, model choice, detecting bad extraction),
+**`docs/libraries.md`** (registry, several models, backup/restore, moving),
+**`docs/maintenance.md`** (check, remove/compact, what each command keeps).
+
 ---
 
 ## Hard rules
@@ -117,6 +127,24 @@ in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
 ## Getting the machine-readable form
 
 `dyp ask "…" --json` returns each result as
-`{chunk_id, book, path, offset, cos, vec_rank, bm25_rank, text}` — parse this
-rather than scraping the pretty output when you are acting on results
-programmatically.
+`{rank, chunk_id, book, chapter, path, offset, cos, provenance, state, text}` —
+parse this rather than scraping the pretty output when acting on results
+programmatically. `provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`);
+`text` is `null` when the passage could not be proved against its stored hash, and
+`state` says why — **never quote a passage whose `text` is null**. Full schema in
+`docs/searching.md`.
+
+---
+
+## Deeper reference — read on demand
+
+Short pages, consulted only when a task needs more than the rules above. Do not
+read them pre-emptively; each is a lookup for one kind of work.
+
+| page | read it when |
+|---|---|
+| `docs/searching.md` | a search misbehaves, or you need the `--json` schema or the `--summarise` trust rules |
+| `docs/indexing.md` | building a new index — `add`, `embed`, chunk size, choosing a model, spotting bad extraction |
+| `docs/libraries.md` | several libraries or models, backup/restore, moving text, model-by-weights and `--verify` |
+| `docs/maintenance.md` | `check`, removing books, compaction, and exactly what each command keeps vs removes |
+| `docs/troubleshooting.md` | an error string or symptom — a lookup table from what you saw to what to do |
