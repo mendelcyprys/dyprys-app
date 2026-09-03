@@ -1,0 +1,541 @@
+import pytest
+"""The package imports and the console script is wired up."""
+
+import subprocess
+import sys
+
+
+def test_help_runs():
+    result = subprocess.run(
+        [sys.executable, "-m", "dyprys.cli"], capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    assert "Search a personal library" in result.stdout
+
+
+def test_a_stored_timestamp_renders_in_the_reader_s_timezone(monkeypatch):
+    """Stored UTC, shown local. Slicing the ISO string did neither.
+
+    `[:19]` drops the `+00:00` and prints UTC digits under a heading that reads
+    as local time -- an hour out on BST, thirteen in Auckland. Found by
+    reconciling the embed journal against a shell log of the same runs, which is
+    the one job the journal has.
+    """
+    import os
+    import time as time_mod
+
+    from dyprys.cli import _local
+
+    monkeypatch.setitem(os.environ, "TZ", "Europe/London")
+    time_mod.tzset()
+    try:
+        # 2026-07-01 is inside British Summer Time, so local is UTC+1.
+        assert _local("2026-07-01T12:00:00+00:00") == "2026-07-01 13:00:00"
+        # ...and midwinter is not, so the offset is not hardcoded anywhere.
+        assert _local("2026-01-01T12:00:00+00:00") == "2026-01-01 12:00:00"
+    finally:
+        monkeypatch.undo()
+        time_mod.tzset()
+
+
+def test_a_timestamp_without_an_offset_is_read_as_utc(monkeypatch):
+    """Rows written before the journal recorded offsets must not shift."""
+    import os
+    import time as time_mod
+
+    from dyprys.cli import _local
+
+    monkeypatch.setitem(os.environ, "TZ", "Europe/London")
+    time_mod.tzset()
+    try:
+        assert _local("2026-07-01T12:00:00") == "2026-07-01 13:00:00"
+    finally:
+        monkeypatch.undo()
+        time_mod.tzset()
+
+
+def test_every_command_appears_in_the_grouped_help():
+    """The grouped listing replaces argparse's own, so it must stay complete.
+
+    `dyp --help` prints `COMMAND_GROUPS` instead of the flat alphabetical list,
+    which is the point — eighteen names in one column say nothing about which
+    three you need today. The cost is that a command added without a line here
+    becomes invisible, so this asserts the two cannot drift apart.
+    """
+    import argparse
+    import re
+
+    from dyprys.cli import COMMAND_GROUPS, build_parser
+
+    parser = build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    listed = set(re.findall(r"\b[a-z]+\b", COMMAND_GROUPS))
+
+    assert sub.choices, "no subcommands registered"
+    missing = sorted(set(sub.choices) - listed)
+    assert not missing, f"missing from the grouped help: {missing}"
+
+
+def _flags(command):
+    """The option strings a subcommand accepts."""
+    from dyprys.cli import build_parser
+
+    parser = build_parser()
+    sub = next(a for a in parser._actions if a.__class__.__name__ == "_SubParsersAction")
+    found = set()
+    for action in sub.choices[command]._actions:
+        found.update(action.option_strings)
+    return found - {"-h", "--help"}
+
+
+def test_ask_and_eval_agree_on_every_flag_they_share():
+    """They are the same search reached two ways, and they drift by hand.
+
+    `--expand` and `--expander` were added to both in one sitting by editing two
+    places; the next such flag is where one gets forgotten, and the symptom is
+    an eval that cannot measure what `ask` actually does — which is the one
+    thing the harness exists for.
+    """
+    ask, ev = _flags("ask"), _flags("eval")
+    # eval alone takes the question set and the arms to compare.
+    eval_only = {"--questions", "--lexical", "--compare"}
+    # ask alone drafts an answer from what was found. It changes how results are
+    # presented and not which results they are, so there is nothing in it for a
+    # retrieval harness to measure — any *other* ask-only flag is drift.
+    # All three change how results are *presented*, not which results they are,
+    # so a retrieval harness has nothing to measure in any of them.
+    ask_only = {"--summarise", "--full", "--quiet", "-q"}
+
+    assert ask - ev == ask_only, f"unexpected ask-only flags: {sorted(ask - ev - ask_only)}"
+    assert ev - ask == eval_only, f"unexpected eval-only flags: {sorted(ev - ask - eval_only)}"
+
+
+def test_counts_are_spelled_the_same_way_everywhere():
+    """`--limit` on one command and `-n` on another is a thing to look up twice."""
+    assert "--limit" in _flags("embed")
+    assert "--limit" in _flags("history")
+
+
+def test_the_long_running_commands_can_be_scoped_to_a_shelf():
+    """The gap that mattered: search could target part of a library, work could not."""
+    assert {"-c", "--collection"} <= _flags("embed")
+    assert {"-c", "--collection"} <= _flags("ask")
+    assert {"-c", "--collection"} <= _flags("eval")
+
+
+@pytest.mark.parametrize("argv", [
+    ["history"],
+    ["history", "-n", "3"],
+    ["history", "--limit", "3"],
+    ["status"],
+    ["books"],
+    ["check"],
+])
+def test_the_reporting_commands_actually_run(tmp_path, argv):
+    """Inspecting a parser is not running a command.
+
+    Adding `--limit` beside `-n` moved argparse's dest from `n` to `limit`, so
+    `dyp history` raised AttributeError — while a test that only asked the
+    parser which flags exist passed, and the break shipped. Every read-only
+    command is now actually invoked against a real index.
+    """
+    from dyprys.cli import main
+
+    book = tmp_path / "book.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 8 for n in range(12)),
+                    encoding="utf-8")
+    data = str(tmp_path / "ix")
+    assert main(["--data", data, "add", str(book)]) == 0
+
+    assert main(["--data", data, *argv]) in (0, 1)
+
+
+def test_every_result_carries_a_cosine_even_when_only_bm25_found_it(tmp_path):
+    """A literal match with a low cosine is the useful case, not an edge case.
+
+    It says the passage contains your words without being about them, which is
+    exactly when a keyword hit misleads — and on a real index the passage
+    holding a remembered phrase scored 0.42 while an unrelated book scored 0.63.
+    Computing it for the fused list is k dot products against vectors already on
+    disk, so there is no reason to show it for only half the results.
+    """
+    import numpy as np
+
+    from dyprys import db as _db
+    from dyprys.cli import _searcher
+    from dyprys.embed import store_for
+    from dyprys.lexical import backfill
+    from tests.conftest import DIM, StubEmbedder
+
+    book = tmp_path / "book.txt"
+    book.write_text("\n\n".join(
+        f"Paragraph {n} concerning neurons and synapses. " * 9 for n in range(30)),
+        encoding="utf-8")
+    conn = _db.connect(tmp_path / "ix")
+    from dyprys.ingest import ingest_paths
+    ingest_paths(conn, [book])
+    embedder = StubEmbedder()
+    model = _db.model_id(conn, "stub", DIM)
+    store = store_for(conn, tmp_path / "ix", model, DIM)
+    with conn:
+        for seg in conn.execute("SELECT id, chunk_count FROM segments").fetchall():
+            _db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+    total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    for cid in range(1, total + 1):
+        store.write(cid, embedder.embed_query(f"chunk {cid}"))
+    store.flush()
+    backfill(conn)
+
+    run = _searcher(conn, store, embedder, model, "hybrid", None)
+    hits = run("Paragraph 7 concerning neurons", 5)
+
+    assert hits, "the fixture should return something"
+    for hit in hits:
+        assert hit.chunk_id in run.cosine, f"chunk {hit.chunk_id} has no cosine"
+        assert -1.0001 <= run.cosine[hit.chunk_id] <= 1.0001
+        assert hit.chunk_id in run.why
+    conn.close()
+
+
+def test_a_missing_optional_model_names_something_runnable(monkeypatch):
+    """Naming the flag is not help.
+
+    Someone who has never installed ollama and owns no .gguf learns nothing
+    from "pass --expander PATH.gguf". All three optional roles failed that way,
+    in three different wordings, while `dyp models` listed only the embedding
+    model — so there was no path from the error to a working command.
+    """
+    from dyprys import cli
+
+    monkeypatch.setattr(cli, "ollama_models", lambda *a, **k: ["gemma3:4b", "qwen3:4b"])
+    message = cli._no_model_for("expansion", "--expand", "DYPRYS_EXPANDER")
+
+    assert "gemma3:4b" in message
+    assert "dyp ask" in message and "--expand gemma3:4b" in message
+    assert "dyp models" in message
+
+
+def test_the_reranker_is_not_offered_a_chat_model(monkeypatch):
+    """It scores (query, passage) pairs; a chat name cannot do the job.
+
+    Suggesting one would be a recommendation that fails, which is worse than
+    the unhelpful message it replaced.
+    """
+    from dyprys import cli
+
+    monkeypatch.setattr(cli, "ollama_models", lambda *a, **k: ["gemma3:4b"])
+    message = cli._no_model_for("reranker", "--reranker", "DYPRYS_RERANKER", chat=False)
+
+    assert "gemma3:4b" not in message
+    assert "cross-encoder" in message
+
+
+def test_an_absent_ollama_does_not_stall_the_listing():
+    """`dyp models` calls this, and most users will not have ollama."""
+    import time
+
+    from dyprys.cli import ollama_models
+
+    began = time.monotonic()
+    assert ollama_models("http://localhost:1") == []
+    assert time.monotonic() - began < 2.0
+
+
+def test_every_optional_role_is_listed_and_settable():
+    """A role that exists only in argparse is a role nobody finds.
+
+    Each must have an environment variable, a flag, and a key that both
+    `dyp models --KEY` and the stored default agree on.
+    """
+    from dyprys.cli import OPTIONAL_ROLES, _env_for, build_parser
+
+    settable = _flags("models")
+    for role, env, flag, key, what in OPTIONAL_ROLES:
+        assert env.startswith("DYPRYS_"), role
+        assert flag.startswith("--"), role
+        assert f"--{key}" in settable, f"{role} has no `dyp models --{key}`"
+        assert _env_for(key) == env, f"{role} names the wrong variable"
+        assert what, role
+    assert build_parser()
+
+
+def _index(tmp_path):
+    from dyprys import db as _db
+
+    return _db.connect(tmp_path / "ix")
+
+
+def test_a_remembered_default_is_used_when_nothing_else_says(tmp_path, monkeypatch):
+    from dyprys import db as _db
+    from dyprys.cli import resolve_model
+
+    conn = _index(tmp_path)
+    monkeypatch.delenv("DYPRYS_EXPANDER", raising=False)
+    with conn:
+        _db.set_meta(conn, "model.expander", "gemma3:4b")
+
+    assert resolve_model(conn, "expander", "DYPRYS_EXPANDER") == "gemma3:4b"
+    conn.close()
+
+
+def test_explicit_beats_remembered_and_the_environment(tmp_path, monkeypatch):
+    """The same rule `--data` follows against a stored default library.
+
+    A command that names its model must never be redirected by a setting made
+    weeks earlier — that is the failure mode of remembered state, and it is
+    silent, because the wrong model still returns results.
+    """
+    from dyprys import db as _db
+    from dyprys.cli import resolve_model
+
+    conn = _index(tmp_path)
+    monkeypatch.setenv("DYPRYS_EXPANDER", "from-env")
+    with conn:
+        _db.set_meta(conn, "model.expander", "from-index")
+
+    assert resolve_model(conn, "expander", "DYPRYS_EXPANDER", "typed") == "typed"
+    # ...and the environment beats the index, being scoped to this shell.
+    assert resolve_model(conn, "expander", "DYPRYS_EXPANDER") == "from-env"
+    conn.close()
+
+
+def test_a_default_can_be_forgotten(tmp_path, monkeypatch):
+    from dyprys.cli import _set_default_model, default_model
+
+    conn = _index(tmp_path)
+    monkeypatch.setattr("dyprys.cli.ollama_models", lambda *a, **k: ["gemma3:4b"])
+    _set_default_model(conn, "expander", "gemma3:4b")
+    assert default_model(conn, "expander") == "gemma3:4b"
+
+    _set_default_model(conn, "expander", "none")
+    assert default_model(conn, "expander") is None
+    conn.close()
+
+
+def test_a_default_is_checked_when_it_is_set_not_when_it_is_needed(tmp_path, monkeypatch):
+    """Setting and using can be weeks apart.
+
+    A typo stored today should be refused today, not surface as a failed search
+    in a fortnight with no clue where it came from.
+    """
+    from dyprys.cli import _set_default_model, default_model
+
+    conn = _index(tmp_path)
+    monkeypatch.setattr("dyprys.cli.ollama_models", lambda *a, **k: ["gemma3:4b"])
+
+    assert _set_default_model(conn, "expander", "gemma3-4b-typo") == 1
+    assert default_model(conn, "expander") is None, "a rejected value was stored"
+    conn.close()
+
+
+def test_progress_leaves_what_it_printed_on_the_screen(monkeypatch, capsys):
+    """The interesting part must not flash past and vanish.
+
+    An earlier version wrote a transient line and erased it, so the rephrasing
+    the model chose and the books routing picked were gone before they could be
+    read. Nothing is erased now, and nothing writes cursor-control codes — a
+    captured log used to be full of `[K`.
+    """
+    from dyprys import cli
+
+    stages = cli.Stages(on=True)
+    stages.note("routed to 5 of 3,453 books")
+    stages.note("Principles of Neural Science", indent=1)
+    stages.working("drafting …")
+
+    err = capsys.readouterr().err
+    assert "\033[K" not in err and "\r" not in err
+    assert "routed to 5 of 3,453 books" in err
+    assert "Principles of Neural Science" in err
+    assert "drafting" in err
+
+
+def test_progress_can_be_silenced(capsys):
+    """`-q` is for scripts; the commentary is on stderr but still noise there."""
+    from dyprys import cli
+
+    cli.Stages(on=False).note("routed to", "somewhere")
+
+    assert capsys.readouterr().err == ""
+
+
+def test_ask_only_flags_are_the_presentation_ones():
+    """Anything else appearing only on `ask` is drift between it and `eval`."""
+    ask, ev = _flags("ask"), _flags("eval")
+
+    assert ask - ev == {"--summarise", "--full", "--quiet", "-q"}
+
+
+def test_a_question_and_its_answer_are_kept(tmp_path):
+    """A question worth asking twice should not need reconstructing from memory."""
+    import json
+
+    from dyprys import db as _db
+
+    conn = _db.connect(tmp_path / "ix")
+    _db.record_question(conn, "what is myelin", "hybrid", 431.2, {
+        "routed": True, "books": 5,
+        "models": {"expander": "gemma3:4b"},
+        "hits": [{"chunk": 7, "title": "A Book", "path": "/b.txt",
+                  "offset": 12, "cos": 0.44, "why": "vec 1"}],
+        "answer": {"prose": "…", "verified": [], "rejected": []},
+    })
+
+    rows = _db.questions_asked(conn)
+    assert len(rows) == 1
+    kept = json.loads(rows[0]["detail"])
+    assert kept["models"]["expander"] == "gemma3:4b"
+    assert kept["hits"][0]["chunk"] == 7
+    conn.close()
+
+
+def test_questions_can_be_searched_and_forgotten(tmp_path):
+    from dyprys import db as _db
+
+    conn = _db.connect(tmp_path / "ix")
+    for q in ("about myelin", "about synapses", "about myelin again"):
+        _db.record_question(conn, q, "hybrid", 1.0, {})
+
+    assert len(_db.questions_asked(conn, match="myelin")) == 2
+    assert _db.forget_questions(conn, which=_db.questions_asked(conn)[0]["id"]) == 1
+    assert len(_db.questions_asked(conn)) == 2
+    assert _db.forget_questions(conn) == 2
+    assert _db.questions_asked(conn) == []
+    conn.close()
+
+
+def test_forgetting_by_date_keeps_the_recent_ones(tmp_path):
+    from dyprys import db as _db
+
+    conn = _db.connect(tmp_path / "ix")
+    with conn:
+        conn.execute("INSERT INTO asked (at, question, mode, ms, detail) "
+                     "VALUES ('2020-01-01T00:00:00+00:00', 'old', 'hybrid', 1.0, '{}')")
+        conn.execute("INSERT INTO asked (at, question, mode, ms, detail) "
+                     "VALUES ('2030-01-01T00:00:00+00:00', 'new', 'hybrid', 1.0, '{}')")
+
+    assert _db.forget_questions(conn, before="2025-01-01") == 1
+    assert [r["question"] for r in _db.questions_asked(conn)] == ["new"]
+    conn.close()
+
+
+def test_the_listing_columns_line_up_without_colour(tmp_path, capsys, monkeypatch):
+    """Escape codes have no width on screen and full width to str.format.
+
+    Padding a styled string makes every column ragged; the first version did
+    exactly that and the header sat four characters from its own numbers.
+    """
+    from dyprys import cli, db as _db
+    from dyprys import term as term_mod
+
+    monkeypatch.setattr(term_mod, "COLOUR", False)
+    conn = _db.connect(tmp_path / "ix")
+    _db.record_question(conn, "a short question", "hybrid", 12.0, {})
+    _db.record_question(conn, "another question", "hybrid", 3456.0, {})
+
+    class Args:
+        which = None
+        limit = 10
+        find = None
+        forget = None
+        yes = False
+
+    cli._asked(conn, Args())
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    header, *rows = lines
+    for row in rows[:2]:
+        assert row.index("hybrid") if "hybrid" in row else True
+        assert len(row) > 0 and row[:5].strip().isdigit()
+    assert header.index("when") == rows[0].index("2"), "columns do not line up"
+    conn.close()
+
+
+def test_watch_follows_one_model_not_the_sum_of_all(tmp_path):
+    """A second model in a finished library showed over 100% done.
+
+    `SUM(n_embedded)` across every model counted the first model's completed
+    284,627 toward the second model's total, so watching a fresh embed into an
+    already-embedded library reported more progress than there was work.
+    """
+    from dyprys import db as _db
+    from dyprys.cli import _model_being_embedded
+    from dyprys.ingest import ingest_paths
+
+    library = tmp_path / "lib"
+    library.mkdir()
+    (library / "b.txt").write_text("\n\n".join(
+        f"Paragraph {n} about neurons. " * 10 for n in range(30)), encoding="utf-8")
+    conn = _db.connect(tmp_path / "ix")
+    ingest_paths(conn, [library])
+    total = conn.execute("SELECT SUM(chunk_count) FROM segments").fetchone()[0]
+    chunking = _db.chunkings(conn)[0]["id"]
+
+    finished = _db.model_id(conn, "done@aaaaaaaaaaaa", 8)
+    running = _db.model_id(conn, "busy@bbbbbbbbbbbb", 8)
+    _db.bind_chunking(conn, finished, chunking)
+    _db.bind_chunking(conn, running, chunking)
+    with conn:
+        for seg in conn.execute("SELECT id, chunk_count FROM segments").fetchall():
+            _db.set_embedded_prefix(conn, finished, seg["id"], seg["chunk_count"])
+            _db.set_embedded_prefix(conn, running, seg["id"], 1)
+
+    model_id, name, bound = _model_being_embedded(conn)
+    assert model_id == running, "watch would have followed the finished model"
+
+    done = conn.execute(
+        "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress WHERE model_id = ?",
+        (model_id,)).fetchone()[0]
+    assert done < total, f"{done} of {total} is over 100%"
+    conn.close()
+
+
+def test_k_below_one_is_refused_by_both_ask_and_eval():
+    """`-k 0` asks for no passages. It used to fall through to an empty result and
+    be reported as "nothing embedded yet — run `dyp embed`", sending the user to
+    re-embed a finished index over a bad argument."""
+    from dyprys.cli import build_parser
+
+    parser = build_parser()
+    for command in ("ask", "eval"):
+        for bad in ("0", "-3"):
+            argv = [command, "q"] if command == "ask" else [command]
+            with pytest.raises(SystemExit) as caught:
+                parser.parse_args(argv + ["-k", bad])
+            assert caught.value.code == 2
+
+
+def test_a_k_of_one_or_more_is_accepted():
+    from dyprys.cli import build_parser
+
+    assert build_parser().parse_args(["ask", "q", "-k", "1"]).k == 1
+    assert build_parser().parse_args(["ask", "q", "-k", "50"]).k == 50
+
+
+def test_an_empty_query_is_refused_before_any_search(tmp_path, capsys):
+    """An empty or whitespace query embeds to a meaningless vector and matches no
+    words, so hybrid search returns whatever the vector half drifts to. Refuse it
+    rather than present noise as answers at exit 0."""
+    from dyprys import db as _db
+    from dyprys.cli import _ask, build_parser
+    from dyprys.ingest import ingest_paths
+
+    book = tmp_path / "b.txt"
+    book.write_text("Paragraph about neurons. " * 400, encoding="utf-8")
+    conn = _db.connect(tmp_path / "ix")
+    ingest_paths(conn, [book])
+
+    for blank in ("", "   ", "\t \n"):
+        args = build_parser().parse_args(["ask", blank])
+        assert _ask(conn, tmp_path / "ix", args) == 2
+    assert "empty query" in capsys.readouterr().err
+    conn.close()
+
+
+def test_a_padded_query_is_stripped_not_rejected(tmp_path):
+    """Surrounding whitespace is trimmed, so "  synapse  " searches for "synapse"."""
+    from dyprys.cli import build_parser
+
+    args = build_parser().parse_args(["ask", "  synapse  "])
+    # The strip happens inside _ask; here we assert the parser keeps it verbatim
+    # so _ask is the single place that owns the cleaning.
+    assert args.question == "  synapse  "

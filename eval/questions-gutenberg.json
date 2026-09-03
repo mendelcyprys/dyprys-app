@@ -1,0 +1,122 @@
+[
+ {
+  "q": "the common on which the first cylinder from Mars came down",
+  "a": "Horsell",
+  "kind": "lookup"
+ },
+ {
+  "q": "the winged people who say that Luata is their father",
+  "a": "Wieroos",
+  "kind": "lookup"
+ },
+ {
+  "q": "the wise woman asked whether the young laird would die by sword or by ball",
+  "a": "Ailsie",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the timber-merchant's family that the poorer Winterborne was intimate with",
+  "a": "Melburys",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the lord whose marked attentions to Fanny her mother pointed out to her",
+  "a": "Glenfallen",
+  "kind": "lookup"
+ },
+ {
+  "q": "the Irish estate where Craig's co-operative farming experiment succeeded",
+  "a": "Ralahine",
+  "kind": "lookup"
+ },
+ {
+  "q": "the large strong man who wanted to be king and led those angry at their brethren",
+  "a": "Amalickiah",
+  "kind": "descriptive"
+ },
+ {
+  "q": "whose son Elizur stood at the head of the tribe of Reuben",
+  "a": "Shedeur",
+  "kind": "lookup"
+ },
+ {
+  "q": "the son of Shomer, one of the two servants who struck down Joash",
+  "a": "Jehozabad",
+  "kind": "lookup"
+ },
+ {
+  "q": "the Abyssinian town said to stand on the ruins of ancient Berlin",
+  "a": "Gondar",
+  "kind": "oblique"
+ },
+ {
+  "q": "the crusading leader whom heaven's messenger is sent to ask why he rests",
+  "a": "Godfredo",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the Texas farm the family returned to in 1919",
+  "a": "Lamesa",
+  "kind": "lookup"
+ },
+ {
+  "q": "the German-American way of saying a drinking spree, with sh replacing s",
+  "a": "shpree",
+  "kind": "oblique"
+ },
+ {
+  "q": "the two sisters whose family friend the narrator's father is, and about whose Aga he keeps his suspicions",
+  "a": "Jenkynses",
+  "kind": "lookup"
+ },
+ {
+  "q": "the fireside legend preserved alongside Cinderella from the same common original",
+  "a": "Punchkin",
+  "kind": "lookup"
+ },
+ {
+  "q": "the river imagined flowing beneath Jimmy Malone instead of water",
+  "a": "Melwood",
+  "kind": "oblique"
+ },
+ {
+  "q": "the mountains where the studious youth Hien's father had been chief tax-collector",
+  "a": "Chunling",
+  "kind": "lookup"
+ },
+ {
+  "q": "the clean and well-dressed people who spread mats for Captain Clark and set fish, roots and berries before him",
+  "a": "Clatsops",
+  "kind": "lookup"
+ },
+ {
+  "q": "the brothers whom Almagro's scattered followers regarded as the murderers of their leader",
+  "a": "Pizarros",
+  "kind": "lookup"
+ },
+ {
+  "q": "the captain at the flying school greeted as the General disguised as Charlie Chaplin",
+  "a": "Roylance",
+  "kind": "lookup"
+ },
+ {
+  "q": "what the queen bids him do to his sword, so their forward son may be dubbed a knight",
+  "a": "Vnsheath",
+  "kind": "oblique"
+ },
+ {
+  "q": "the deserted convent near Llanes, one of the largest monastic edifices in Spain",
+  "a": "Cilorio",
+  "kind": "lookup"
+ },
+ {
+  "q": "the name invoked in libation while comrades crown the bowl and set a javelin mark upon an elm",
+  "a": "Lenaeus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the hedge-priest asked whether he will dispatch them under this tree or at his chapel",
+  "a": "Oliuer",
+  "kind": "descriptive"
+ }
+]

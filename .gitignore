@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# Local data — never commit the index, the vectors, or the library
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.npy
+*.f32
+data/
+.DS_Store

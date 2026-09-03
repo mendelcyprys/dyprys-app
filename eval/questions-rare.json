@@ -1,0 +1,142 @@
+[
+ {
+  "q": "which marine crustaceans have as many as sixteen kinds of photopigment in their eyes",
+  "a": "stomatopod",
+  "kind": "lookup"
+ },
+ {
+  "q": "which cells fill the spiral ligament in the side wall of the cochlear duct",
+  "a": "fibrocytes",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is it called when a taste stops being pleasant once the body has had enough",
+  "a": "alliesthesia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "which caterpillar freezes and drops to the ground on hearing a wasp approach",
+  "a": "brassicae",
+  "kind": "oblique"
+ },
+ {
+  "q": "which group of fish independently evolved sensing of their own electric field",
+  "a": "gymnotiformes",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the membrane protein with four membrane spanning domains that seals the barrier between blood and brain",
+  "a": "occludin",
+  "kind": "mechanism"
+ },
+ {
+  "q": "an insect receptor and ligand pair used to switch off transfected neurons reversibly",
+  "a": "allatostatin",
+  "kind": "mechanism"
+ },
+ {
+  "q": "the jawed vertebrates, which lampreys are set against in evolutionary trees",
+  "a": "gnathostomes",
+  "kind": "lookup"
+ },
+ {
+  "q": "which radical does estrogen neutralise by donating a hydrogen from its aromatic ring",
+  "a": "peroxyl",
+  "kind": "mechanism"
+ },
+ {
+  "q": "the formation of stress granules in astrocytes after heat or metal exposure",
+  "a": "granulogenesis",
+  "kind": "descriptive"
+ },
+ {
+  "q": "a folded RNA whose two helices come apart at different temperatures when heated",
+  "a": "pseudoknot",
+  "kind": "oblique"
+ },
+ {
+  "q": "the serotonin drug paired with 8-OH-DPAT to make spinal rats step again",
+  "a": "quipazine",
+  "kind": "mechanism"
+ },
+ {
+  "q": "involuntary contraction of the muscles around one eye and that corner of the mouth",
+  "a": "hemifacial",
+  "kind": "descriptive"
+ },
+ {
+  "q": "infection spreading from the air spaces of the skull to collect beneath the dura",
+  "a": "sinusitis",
+  "kind": "mechanism"
+ },
+ {
+  "q": "the filament protein that stains negative in stress inclusions of astrocytes",
+  "a": "cytokeratin",
+  "kind": "mechanism"
+ },
+ {
+  "q": "a mouse strain born without the fibre bridge between the two hemispheres",
+  "a": "acallosal",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the sequence of divisions making neurons, governed at the G1 restriction point",
+  "a": "neuronogenetic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "the light gathering quantity of an optical system, conserved through the whole path",
+  "a": "etendue",
+  "kind": "oblique"
+ },
+ {
+  "q": "the medical term for any distortion in the sense of taste",
+  "a": "dysgeusia",
+  "kind": "lookup"
+ },
+ {
+  "q": "burning pain and redness in the extremities caused by vessels closing off in episodes",
+  "a": "erythromelalgia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the great animal branch that holds chordates, echinoderms and hemichordates together",
+  "a": "deuterostomes",
+  "kind": "lookup"
+ },
+ {
+  "q": "the small region below the facial nucleus whose Phox2b cells sense carbon dioxide for breathing",
+  "a": "retrotrapezoid",
+  "kind": "mechanism"
+ },
+ {
+  "q": "colour vision needing four independent variables instead of the usual three",
+  "a": "tetrachromacy",
+  "kind": "lookup"
+ },
+ {
+  "q": "the cricket genus whose ear has an anterior and a posterior membrane on the foreleg",
+  "a": "gryllus",
+  "kind": "lookup"
+ },
+ {
+  "q": "the moth family whose caterpillars sense air movement with body hairs",
+  "a": "noctuidae",
+  "kind": "oblique"
+ },
+ {
+  "q": "the sulfonic acid derivatives used as attached fluorescent labels on proteins",
+  "a": "naphthylamine",
+  "kind": "mechanism"
+ },
+ {
+  "q": "which body segment the cricket auditory interneuron AN1 belongs to",
+  "a": "prothoracic",
+  "kind": "lookup"
+ },
+ {
+  "q": "the carp family of fish, whose preglomerular fibre connections have been traced",
+  "a": "cyprinids",
+  "kind": "oblique"
+ }
+]

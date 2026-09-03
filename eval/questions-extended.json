@@ -1,0 +1,1502 @@
+[
+ {
+  "q": "where the fluid in the ventricles is made",
+  "a": "choroid plexus",
+  "kind": "lookup"
+ },
+ {
+  "q": "what myelinates axons in the central nervous system",
+  "a": "oligodendrocyte",
+  "kind": "lookup"
+ },
+ {
+  "q": "which cells remove debris and dead cells in the brain",
+  "a": "microglia",
+  "kind": "lookup"
+ },
+ {
+  "q": "how does a signal cross from one neuron to the next",
+  "a": "synaptic",
+  "kind": "lookup"
+ },
+ {
+  "q": "which part of the brain coordinates balance and movement",
+  "a": "cerebellum",
+  "kind": "lookup"
+ },
+ {
+  "q": "what structure connects the two cerebral hemispheres",
+  "a": "corpus callosum",
+  "kind": "lookup"
+ },
+ {
+  "q": "which brain region is essential for forming new memories",
+  "a": "hippocampus",
+  "kind": "lookup"
+ },
+ {
+  "q": "what part of the neuron receives incoming signals",
+  "a": "dendrite",
+  "kind": "lookup"
+ },
+ {
+  "q": "which ion entering the terminal triggers neurotransmitter release",
+  "a": "calcium",
+  "kind": "lookup"
+ },
+ {
+  "q": "what forms the myelin sheath in the peripheral nervous system",
+  "a": "schwann",
+  "kind": "lookup"
+ },
+ {
+  "q": "which structure relays sensory information to the cortex",
+  "a": "thalamus",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the narrow gap between two neurons called",
+  "a": "synaptic cleft",
+  "kind": "lookup"
+ },
+ {
+  "q": "which neurotransmitter acts at the neuromuscular junction",
+  "a": "acetylcholine",
+  "kind": "lookup"
+ },
+ {
+  "q": "what part of the brain controls hunger and body temperature",
+  "a": "hypothalamus",
+  "kind": "lookup"
+ },
+ {
+  "q": "what causes the rising phase of the action potential",
+  "a": "sodium",
+  "kind": "lookup"
+ },
+ {
+  "q": "which glutamate receptor is blocked by magnesium at rest",
+  "a": "nmda",
+  "kind": "lookup"
+ },
+ {
+  "q": "what are the light sensitive cells of the retina",
+  "a": "photoreceptor",
+  "kind": "lookup"
+ },
+ {
+  "q": "which nerve carries visual information from the eye",
+  "a": "optic nerve",
+  "kind": "lookup"
+ },
+ {
+  "q": "what part of the ear converts sound into neural signals",
+  "a": "cochlea",
+  "kind": "lookup"
+ },
+ {
+  "q": "which brain area is associated with speech production",
+  "a": "broca",
+  "kind": "lookup"
+ },
+ {
+  "q": "which area is associated with language comprehension",
+  "a": "wernicke",
+  "kind": "lookup"
+ },
+ {
+  "q": "which system controls involuntary functions like heart rate",
+  "a": "autonomic",
+  "kind": "lookup"
+ },
+ {
+  "q": "which cells maintain the blood brain barrier and support neurons",
+  "a": "astrocyte",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the junction where an axon meets a muscle fibre",
+  "a": "neuromuscular junction",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the gap in the myelin sheath where the signal regenerates",
+  "a": "ranvier",
+  "kind": "lookup"
+ },
+ {
+  "q": "which lobe of the cortex processes visual information",
+  "a": "occipital",
+  "kind": "lookup"
+ },
+ {
+  "q": "what part of the neuron carries the signal away from the cell body",
+  "a": "axon",
+  "kind": "lookup"
+ },
+ {
+  "q": "which structure is involved in fear and emotional responses",
+  "a": "amygdala",
+  "kind": "lookup"
+ },
+ {
+  "q": "how do sensory receptors convert stimuli into electrical signals",
+  "a": "transduction",
+  "kind": "lookup"
+ },
+ {
+  "q": "what membranes wrap around the brain and spinal cord",
+  "a": "meninges",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the all or none electrical signal in neurons called",
+  "a": "action potential",
+  "kind": "lookup"
+ },
+ {
+  "q": "which neurotransmitter is lost in Parkinson's disease",
+  "a": "dopamine",
+  "kind": "lookup"
+ },
+ {
+  "q": "how do repeated signals strengthen a synapse over time",
+  "a": "long-term potentiation",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the outer grey layer of the cerebrum called",
+  "a": "cortex",
+  "kind": "lookup"
+ },
+ {
+  "q": "which structure connects the brain to the spinal cord",
+  "a": "brainstem",
+  "kind": "lookup"
+ },
+ {
+  "q": "the wrinkled folds that increase the surface area of the brain",
+  "a": "gyri",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the grooves separating the folds on the surface of the brain",
+  "a": "sulci",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the fluid filled cavities deep inside the brain",
+  "a": "ventricle",
+  "kind": "descriptive"
+ },
+ {
+  "q": "supporting cells of the nervous system that do not fire",
+  "a": "glia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the tough outermost membrane covering the brain",
+  "a": "dura",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the delicate membrane that follows every contour of the brain surface",
+  "a": "pia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the layer of cells lining the ventricles",
+  "a": "ependymal",
+  "kind": "descriptive"
+ },
+ {
+  "q": "tiny protrusions on a dendrite where most excitatory contacts are made",
+  "a": "spine",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the place where an axon leaves the cell body and the signal begins",
+  "a": "hillock",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the darkly pigmented midbrain nucleus that degenerates in Parkinson disease",
+  "a": "substantia nigra",
+  "kind": "descriptive"
+ },
+ {
+  "q": "proteins that let charged particles pass through the cell membrane",
+  "a": "ion channel",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the pump that keeps one ion out of the cell and another in",
+  "a": "atpase",
+  "kind": "descriptive"
+ },
+ {
+  "q": "retinal cells that work in very dim light",
+  "a": "rod",
+  "kind": "descriptive"
+ },
+ {
+  "q": "retinal cells responsible for colour",
+  "a": "cone",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the tiny bones that amplify vibration in the middle ear",
+  "a": "ossicle",
+  "kind": "descriptive"
+ },
+ {
+  "q": "fluid filled loops that detect rotation of the head",
+  "a": "semicircular",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the point where fibres from the two eyes partially cross",
+  "a": "chiasm",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the distorted map of the body laid out across the cortex",
+  "a": "homunculus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "bundles of fibres carrying motor commands down the spinal cord",
+  "a": "corticospinal",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the charge difference across the membrane of a cell at rest",
+  "a": "resting potential",
+  "kind": "descriptive"
+ },
+ {
+  "q": "a response that either happens fully or not at all",
+  "a": "all-or-none",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the brief window after firing when a cell cannot fire again",
+  "a": "refractory",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the outer covering that speeds conduction along a nerve fibre",
+  "a": "myelin",
+  "kind": "descriptive"
+ },
+ {
+  "q": "cells of the immune system that live inside the brain",
+  "a": "microglia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the almond shaped structure buried in the temporal lobe",
+  "a": "amygdala",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the seahorse shaped structure in the medial temporal lobe",
+  "a": "hippocampus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the gateway through which almost all sensory input reaches the cortex",
+  "a": "thalamus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the structure that keeps movement smooth and coordinated",
+  "a": "cerebellum",
+  "kind": "descriptive"
+ },
+ {
+  "q": "cells that produce the insulating wrapping in the brain itself",
+  "a": "oligodendrocyte",
+  "kind": "descriptive"
+ },
+ {
+  "q": "cells that insulate nerve fibres outside the brain and spinal cord",
+  "a": "schwann",
+  "kind": "descriptive"
+ },
+ {
+  "q": "why can a nerve impulse travel in only one direction",
+  "a": "refractory",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a signal skip from gap to gap along an insulated fibre",
+  "a": "saltatory",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what stops a chemical messenger acting indefinitely after release",
+  "a": "reuptake",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how is the strength of a stimulus represented by a nerve cell",
+  "a": "frequency",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does injury on one side of the brain affect the other side of the body",
+  "a": "decussation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what keeps most substances in the blood out of nervous tissue",
+  "a": "blood-brain barrier",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a memory become resistant to disruption with time",
+  "a": "consolidation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what process weakens a connection that goes unused",
+  "a": "long-term depression",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how do two ears together locate where a sound came from",
+  "a": "interaural",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does vision recover sensitivity after entering a dark room",
+  "a": "adaptation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what makes the pupil narrow in bright light",
+  "a": "reflex",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does an electrical signal become a chemical one at a junction",
+  "a": "vesicle",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what triggers the contents of a vesicle to be released",
+  "a": "calcium",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a cell restore its charge after firing",
+  "a": "potassium",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why is the inside of a resting cell negative relative to the outside",
+  "a": "permeability",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how do repeated signals leave a lasting change at a connection",
+  "a": "long-term potentiation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what allows a receptor to stay silent until the cell is already active",
+  "a": "magnesium",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how is a limb kept steady without conscious attention",
+  "a": "proprioception",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does the body keep temperature within a narrow range",
+  "a": "hypothalamus",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what carries a command from the nervous system to a muscle",
+  "a": "motor neuron",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what is the brain's rubbish collection service",
+  "a": "microglia",
+  "kind": "oblique"
+ },
+ {
+  "q": "which brain part goes wrong when someone develops a tremor and stiffness",
+  "a": "substantia nigra",
+  "kind": "oblique"
+ },
+ {
+  "q": "what happens in the brain when someone cannot form new memories after surgery",
+  "a": "hippocampus",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes some people unable to speak but still understand",
+  "a": "broca",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes speech fluent but meaningless",
+  "a": "wernicke",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the wiring that lets the left and right halves talk to each other",
+  "a": "corpus callosum",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is damaged when someone loses their sense of balance",
+  "a": "vestibular",
+  "kind": "oblique"
+ },
+ {
+  "q": "why does a limb sometimes feel present after it has been removed",
+  "a": "phantom",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the chemical people mean when they talk about reward and motivation",
+  "a": "dopamine",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the brain's own painkiller",
+  "a": "endorphin",
+  "kind": "oblique"
+ },
+ {
+  "q": "what does caffeine block in the brain",
+  "a": "adenosine",
+  "kind": "oblique"
+ },
+ {
+  "q": "what changes in the brain when a skill is practised for years",
+  "a": "plasticity",
+  "kind": "oblique"
+ },
+ {
+  "q": "why do we not see a hole where the nerve leaves each eye",
+  "a": "blind spot",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the eye focuses light onto the back of it",
+  "a": "lens",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the sheet of cells at the back of the eye that detects light",
+  "a": "retina",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the electrical spike people mean when they say a cell fires",
+  "a": "action potential",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the liquid that cushions the brain inside the skull",
+  "a": "cerebrospinal",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is destroyed in multiple sclerosis",
+  "a": "myelin",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is being recorded when electrodes are placed on the scalp",
+  "a": "electroencephalog",
+  "kind": "oblique"
+ },
+ {
+  "q": "what technique shows which brain areas are active by tracking blood flow",
+  "a": "fmri",
+  "kind": "oblique"
+ },
+ {
+  "q": "what do we call the study of how brain damage changes behaviour",
+  "a": "neuropsycholog",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the point of contact where one cell influences another",
+  "a": "synapse",
+  "kind": "oblique"
+ },
+ {
+  "q": "what surrounds and protects nerve cells in the brain besides the skull",
+  "a": "meninges",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the brain is active when someone feels afraid",
+  "a": "amygdala",
+  "kind": "oblique"
+ },
+ {
+  "q": "what governs breathing and heartbeat without any thought",
+  "a": "medulla",
+  "kind": "oblique"
+ },
+ {
+  "q": "which cranial nerve carries hearing and balance from the inner ear",
+  "a": "vestibulocochlear",
+  "kind": "lookup"
+ },
+ {
+  "q": "which thalamic nucleus receives fibres from the optic tract",
+  "a": "geniculate",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the light-absorbing pigment of a rod",
+  "a": "rhodopsin",
+  "kind": "lookup"
+ },
+ {
+  "q": "which retinal cells send axons out of the eye",
+  "a": "ganglion cell",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the principal excitatory transmitter of the mammalian brain",
+  "a": "glutamate",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the principal inhibitory transmitter of the mammalian brain",
+  "a": "gaba",
+  "kind": "lookup"
+ },
+ {
+  "q": "what kind of channel opens when a transmitter binds it directly",
+  "a": "ligand-gated",
+  "kind": "lookup"
+ },
+ {
+  "q": "what recording method measures current through one channel",
+  "a": "patch clamp",
+  "kind": "lookup"
+ },
+ {
+  "q": "which pufferfish toxin blocks voltage-gated sodium channels",
+  "a": "tetrodotoxin",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the fluid-filled space beneath the arachnoid",
+  "a": "subarachnoid",
+  "kind": "lookup"
+ },
+ {
+  "q": "which artery supplies most of the lateral surface of the hemisphere",
+  "a": "middle cerebral",
+  "kind": "lookup"
+ },
+ {
+  "q": "what is the arterial ring at the base of the brain",
+  "a": "circle of willis",
+  "kind": "lookup"
+ },
+ {
+  "q": "which narrow channel joins the third and fourth ventricles",
+  "a": "aqueduct",
+  "kind": "lookup"
+ },
+ {
+  "q": "what structures return cerebrospinal fluid to the venous sinuses",
+  "a": "arachnoid granulation",
+  "kind": "lookup"
+ },
+ {
+  "q": "which cells provide the sole output of the cerebellar cortex",
+  "a": "purkinje",
+  "kind": "lookup"
+ },
+ {
+  "q": "which brainstem nucleus sends the fibers that wrap a Purkinje cell",
+  "a": "inferior olive",
+  "kind": "lookup"
+ },
+ {
+  "q": "which brainstem nucleus supplies most of the brain's noradrenaline",
+  "a": "locus coeruleus",
+  "kind": "lookup"
+ },
+ {
+  "q": "which midline brainstem nuclei supply most of the brain's serotonin",
+  "a": "raphe",
+  "kind": "lookup"
+ },
+ {
+  "q": "what swelling on a dorsal root holds sensory cell bodies",
+  "a": "dorsal root ganglion",
+  "kind": "lookup"
+ },
+ {
+  "q": "which ascending tract carries pain and temperature",
+  "a": "spinothalamic",
+  "kind": "lookup"
+ },
+ {
+  "q": "what receptor responds to stimuli that damage tissue",
+  "a": "nociceptor",
+  "kind": "lookup"
+ },
+ {
+  "q": "which chilli compound opens a heat-sensitive channel",
+  "a": "capsaicin",
+  "kind": "lookup"
+ },
+ {
+  "q": "what sheet of receptor cells lies high in the nasal cavity",
+  "a": "olfactory epithelium",
+  "kind": "lookup"
+ },
+ {
+  "q": "which perforated bone do the smell fibres pass through",
+  "a": "cribriform",
+  "kind": "lookup"
+ },
+ {
+  "q": "which cochlear membrane vibrates in response to sound",
+  "a": "basilar",
+  "kind": "lookup"
+ },
+ {
+  "q": "what are the sensory cells of the organ of Corti",
+  "a": "hair cell",
+  "kind": "lookup"
+ },
+ {
+  "q": "which fluid fills the cochlear duct",
+  "a": "endolymph",
+  "kind": "lookup"
+ },
+ {
+  "q": "what crystals sit on the membrane of the utricle",
+  "a": "otolith",
+  "kind": "lookup"
+ },
+ {
+  "q": "which vesicle protein is cleaved by botulinum toxin",
+  "a": "synaptobrevin",
+  "kind": "lookup"
+ },
+ {
+  "q": "what enzyme destroys acetylcholine in the synaptic gap",
+  "a": "acetylcholinesterase",
+  "kind": "lookup"
+ },
+ {
+  "q": "which acetylcholine receptor is found at the motor end plate",
+  "a": "nicotinic",
+  "kind": "lookup"
+ },
+ {
+  "q": "what region of the hippocampus contains granule cells",
+  "a": "dentate",
+  "kind": "lookup"
+ },
+ {
+  "q": "which hypothalamic nucleus keeps the daily rhythm",
+  "a": "suprachiasmatic",
+  "kind": "lookup"
+ },
+ {
+  "q": "what hormone does the pineal gland release at night",
+  "a": "melatonin",
+  "kind": "lookup"
+ },
+ {
+  "q": "the loss of which peptide causes narcolepsy",
+  "a": "orexin",
+  "kind": "lookup"
+ },
+ {
+  "q": "what protein aggregates into plaques in Alzheimer disease",
+  "a": "amyloid",
+  "kind": "lookup"
+ },
+ {
+  "q": "which method uses light to drive genetically targeted neurons",
+  "a": "optogenetic",
+  "kind": "lookup"
+ },
+ {
+  "q": "what are the paired deep masses that shape voluntary movement",
+  "a": "basal ganglia",
+  "kind": "lookup"
+ },
+ {
+  "q": "which structure carries hippocampal output to the mammillary bodies",
+  "a": "fornix",
+  "kind": "lookup"
+ },
+ {
+  "q": "what cortex supplies most of the input to the hippocampus",
+  "a": "entorhinal",
+  "kind": "lookup"
+ },
+ {
+  "q": "the part of a neuron holding the nucleus",
+  "a": "soma",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the darkly staining stacks of rough endoplasmic reticulum in a nerve cell",
+  "a": "nissl",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the motor protein that hauls cargo away from the cell body",
+  "a": "kinesin",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the exploring tip of a lengthening axon",
+  "a": "growth cone",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the orderly self-destruction that removes surplus cells during development",
+  "a": "apoptosis",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the temporary scaffold cells young neurons climb outward along",
+  "a": "radial glia",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the ridge of cells that gives rise to the peripheral nervous system",
+  "a": "neural crest",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the hollow tube the brain and cord develop from",
+  "a": "neural tube",
+  "kind": "descriptive"
+ },
+ {
+  "q": "a direct electrical coupling between the interiors of two cells",
+  "a": "gap junction",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the voltage at which an ion has no net tendency to move across",
+  "a": "equilibrium potential",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the distance along a process over which a voltage falls away",
+  "a": "length constant",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the ability of a membrane to hold separated charge",
+  "a": "capacitance",
+  "kind": "descriptive"
+ },
+ {
+  "q": "inputs arriving close together in time adding up",
+  "a": "temporal summation",
+  "kind": "descriptive"
+ },
+ {
+  "q": "inputs arriving at different places adding up",
+  "a": "spatial summation",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the small depolarisation produced by one excitatory input",
+  "a": "epsp",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the intracellular messenger adenylate cyclase makes from ATP",
+  "a": "cyclic amp",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the calcium-binding protein that switches on many enzymes",
+  "a": "calmodulin",
+  "kind": "descriptive"
+ },
+ {
+  "q": "a receptor that acts through a G protein instead of its own pore",
+  "a": "metabotropic",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the bacterial toxin that prevents transmitter release at the junction",
+  "a": "botulinum",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the arrow poison that blocks the receptor at the motor end plate",
+  "a": "curare",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the small nucleus under the thalamus whose damage causes wild flinging",
+  "a": "subthalamic",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the cortex buried deep within the lateral sulcus",
+  "a": "insula",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the cortical band arching above the corpus callosum",
+  "a": "cingulate",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the layered midbrain structure that turns the eyes toward a target",
+  "a": "superior colliculus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the sheet of dura standing between the two hemispheres",
+  "a": "falx",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the tapering lower end of the spinal cord",
+  "a": "conus medullaris",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the spray of nerve roots below where the cord ends",
+  "a": "cauda equina",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the shallow pit in the retina where acuity is highest",
+  "a": "fovea",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the retinal cells lying between photoreceptors and the output cells",
+  "a": "bipolar",
+  "kind": "descriptive"
+ },
+ {
+  "q": "one active region damping the response of its neighbours",
+  "a": "lateral inhibition",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the orderly map of sound frequency across a sensory surface",
+  "a": "tonotopic",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the involuntary flicking of the eyes after a spin",
+  "a": "nystagmus",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the deep, onion-layered skin receptor that responds to vibration",
+  "a": "pacinian",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the strip of skin supplied by a single spinal nerve",
+  "a": "dermatome",
+  "kind": "descriptive"
+ },
+ {
+  "q": "one motor neuron together with every fibre it controls",
+  "a": "motor unit",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the rule that small motor units are called on before large ones",
+  "a": "size principle",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the circuit within the cord that produces the rhythm of walking",
+  "a": "central pattern generator",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the upgoing toe that signals damage to the descending motor tract",
+  "a": "babinski",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the bundle joining the two classical language areas",
+  "a": "arcuate",
+  "kind": "descriptive"
+ },
+ {
+  "q": "cells that fire when an animal occupies one particular spot",
+  "a": "place cell",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the layer of cells that lines the ventricles and moves fluid along",
+  "a": "ependyma",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the point where an axon narrows and spikes begin",
+  "a": "initial segment",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the fatty sheath's interruptions where channels are concentrated",
+  "a": "node",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the receptor that reports how far a muscle has been stretched",
+  "a": "muscle spindle",
+  "kind": "descriptive"
+ },
+ {
+  "q": "the receptor in series with a muscle that reports its tension",
+  "a": "golgi tendon",
+  "kind": "descriptive"
+ },
+ {
+  "q": "why does a thicker axon carry a signal faster",
+  "a": "conduction velocity",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a sodium channel close while the membrane is still depolarised",
+  "a": "inactivation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what keeps the ion gradients from running down over hours",
+  "a": "sodium-potassium",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does removing calcium from outside the cell stop transmission",
+  "a": "influx",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how can a receptor tell that two events happened at the same moment",
+  "a": "coincidence detect",
+  "kind": "mechanism"
+ },
+ {
+  "q": "which muscle changes the shape of the lens for near vision",
+  "a": "ciliary",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does bending a sensory hair open its channels",
+  "a": "tip link",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does damage behind the crossing point spare part of each eye",
+  "a": "hemianopia",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how do two forward-facing eyes give a sense of depth",
+  "a": "disparity",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does rubbing an injury make it hurt less",
+  "a": "gate control",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why is heart pain often felt in the arm",
+  "a": "referred pain",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a muscle generate a stronger contraction",
+  "a": "recruitment",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does a tap on the tendon produce an immediate contraction",
+  "a": "monosynaptic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "which cerebellar cell type signals that a movement went wrong",
+  "a": "climbing fiber",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does basal ganglia disease slow movement rather than weaken it",
+  "a": "bradykinesia",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why do the signs of Parkinson disease appear only after most cells are gone",
+  "a": "presymptomatic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does losing myelin slow or block conduction",
+  "a": "conduction block",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does interrupted blood flow kill neurons within minutes",
+  "a": "excitotox",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why is swelling inside the skull so dangerous",
+  "a": "intracranial pressure",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does brain blood flow stay steady when arterial pressure changes",
+  "a": "autoregulation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how do scalp electrodes pick up anything from millions of cells",
+  "a": "synchron",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does functional imaging track blood rather than firing",
+  "a": "hemodynamic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does an infant stop distinguishing sounds it once told apart",
+  "a": "critical period",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does covering one eye early rewire the cortex",
+  "a": "ocular dominance",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a growing axon find its correct target",
+  "a": "netrin",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why are far more neurons made than are kept",
+  "a": "trophic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does medial temporal damage spare skills but not facts",
+  "a": "procedural",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why can a recalled memory become fragile again",
+  "a": "reconsolidation",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why do alertness and temperature swing on a daily cycle",
+  "a": "circadian",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how is the body prevented from acting out its dreams",
+  "a": "atonia",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does cocaine raise the amount of transmitter at the synapse",
+  "a": "transporter",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why do antidepressants take weeks rather than hours to work",
+  "a": "downregulat",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does caffeine block the signal that makes you sleepy",
+  "a": "adenosine receptor",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does the nervous system widen and narrow blood vessels",
+  "a": "vasoconstrict",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does standing up too fast sometimes cause a faint",
+  "a": "baroreceptor",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does the brain hold body temperature at a steady value",
+  "a": "set point",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a signal from fat tissue report how much energy is stored",
+  "a": "leptin",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does damage to the pituitary stalk disturb many hormones at once",
+  "a": "hypophyseal",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does a cut nerve in the arm sometimes recover but one in the cord does not",
+  "a": "regenerat",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a scar in the central nervous system block repair",
+  "a": "inhibitory",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why is the eye considered an outgrowth of the brain",
+  "a": "diencephalon",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does the pupil narrow without any conscious command",
+  "a": "parasympathetic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does looking at a waterfall make rocks appear to drift upward",
+  "a": "aftereffect",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does the brain keep the world still while the eyes move",
+  "a": "efference copy",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does pressing on the eyeball produce a flash of light",
+  "a": "phosphene",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how is a single neuron able to influence thousands of others",
+  "a": "divergence",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how do many inputs converge to make one cell fire",
+  "a": "convergence",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does a drug that blocks dopamine cause stiffness",
+  "a": "extrapyramidal",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does alcohol interfere with the main inhibitory receptor",
+  "a": "gaba",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does a deficiency of thiamine damage the brain",
+  "a": "wernicke",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does high blood ammonia disturb brain function",
+  "a": "hepatic",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why do premature infants risk bleeding inside the brain",
+  "a": "germinal matrix",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does a tumour raise pressure without filling much space",
+  "a": "edema",
+  "kind": "mechanism"
+ },
+ {
+  "q": "why does a slipped disc cause pain down the leg",
+  "a": "compression",
+  "kind": "mechanism"
+ },
+ {
+  "q": "how does an inherited repeat expansion kill particular neurons",
+  "a": "huntington",
+  "kind": "mechanism"
+ },
+ {
+  "q": "what is the reason a knock to the head can black someone out",
+  "a": "concussion",
+  "kind": "oblique"
+ },
+ {
+  "q": "what does the body use as its own painkiller",
+  "a": "endogenous opioid",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the part of the brain that makes you feel full",
+  "a": "hypothalamus",
+  "kind": "oblique"
+ },
+ {
+  "q": "what tells you which way is up when your eyes are shut",
+  "a": "vestibular",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a limb fall asleep when you sit on it",
+  "a": "ischem",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the wiring that makes you pull your hand off a hot pan before you notice",
+  "a": "withdrawal",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes some people taste soap in coriander",
+  "a": "receptor",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the brain is missing when someone cannot recognise faces",
+  "a": "fusiform",
+  "kind": "oblique"
+ },
+ {
+  "q": "what goes wrong when someone ignores one half of everything",
+  "a": "hemispatial",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is broken when a person can speak fluently but make no sense",
+  "a": "wernicke",
+  "kind": "oblique"
+ },
+ {
+  "q": "what stops you from hearing your own chewing as a roar",
+  "a": "attenuat",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a room seem to spin after alcohol",
+  "a": "cupula",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes your leg kick when the doctor taps your knee",
+  "a": "stretch reflex",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the brain do you use to learn to ride a bicycle",
+  "a": "cerebell",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the brain's map of the body's surface",
+  "a": "somatosensory",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a sound seem to come from the left",
+  "a": "interaural",
+  "kind": "oblique"
+ },
+ {
+  "q": "what happens in the brain when someone drinks too much water",
+  "a": "hyponatr",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a bruise on the head cause trouble on the other side",
+  "a": "contrecoup",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the switch that keeps you asleep and stops you waking",
+  "a": "reticular",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the chemical people blame for feeling calm and happy",
+  "a": "serotonin",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a person shake when they are cold",
+  "a": "thermoregulat",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the brain do surgeons avoid to protect speech",
+  "a": "broca",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the tissue that separates blood from brain",
+  "a": "endothelial",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes chilli feel hot when nothing is burning",
+  "a": "trpv",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes mint feel cold in the mouth",
+  "a": "menthol",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes your mouth water before you eat",
+  "a": "salivat",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of you decides you have had enough to drink",
+  "a": "osmoreceptor",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a newborn grip your finger so tightly",
+  "a": "grasp reflex",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes people see things that are not there in the dark",
+  "a": "hallucinat",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is the reason you cannot tickle yourself",
+  "a": "self-generated",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a scent bring back a memory so suddenly",
+  "a": "olfactory bulb",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the brain is smaller in people who have been blind from birth",
+  "a": "occipital",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a person keep repeating the same action",
+  "a": "persevera",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes someone with a brain injury unable to plan",
+  "a": "frontal",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes an arm keep moving when you meant to stop",
+  "a": "overshoot",
+  "kind": "oblique"
+ },
+ {
+  "q": "what causes the pins and needles in a trapped nerve",
+  "a": "paresthes",
+  "kind": "oblique"
+ },
+ {
+  "q": "what part of the body sends signals about joint position",
+  "a": "propriocept",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes some people fall asleep suddenly in the day",
+  "a": "narcolep",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a person's hand shake only when reaching for something",
+  "a": "intention tremor",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a person walk with short shuffling steps",
+  "a": "festinat",
+  "kind": "oblique"
+ },
+ {
+  "q": "what happens in the head during a migraine",
+  "a": "spreading depression",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a brief loss of blood supply cause a passing weakness",
+  "a": "transient ischemic",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is it that gets thicker with practice on a musical instrument",
+  "a": "gray matter",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a child's brain able to recover better than an adult's",
+  "a": "plasticity",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes twins with the same genes end up with different brains",
+  "a": "epigenetic",
+  "kind": "oblique"
+ },
+ {
+  "q": "what causes the ringing in the ears after a loud concert",
+  "a": "tinnitus",
+  "kind": "oblique"
+ },
+ {
+  "q": "what is damaged when someone loses the sense of smell after a fall",
+  "a": "olfactory nerve",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes a person sweat and go pale before fainting",
+  "a": "vasovagal",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes you blink when something comes near your eye",
+  "a": "corneal",
+  "kind": "oblique"
+ },
+ {
+  "q": "what makes it hard to see for a moment when walking into a dark room",
+  "a": "dark adaptation",
+  "kind": "oblique"
+ }
+]
