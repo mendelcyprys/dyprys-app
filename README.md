@@ -8,43 +8,30 @@ Command: `dyp`
 
 ## Status
 
-Working end to end. Ingest, embedding, flat search, the evaluation harness,
-routing, hybrid BM25 and reranking, then compaction, int8 storage, backup and
-restore, a registry for several libraries, and two optional model-backed stages
-— query expansion and answer synthesis.
+Working end to end: ingest, embedding, routing, hybrid vector + BM25 search, and
+the optional model-backed stages (query expansion, reranking, answer synthesis),
+with compaction, int8 storage, backup/restore and a multi-library registry.
 
-Measured on **3,453 books / 284,627 chunks / 1.0 GB of text**, fully embedded by
-two different models, routed and BM25-indexed, with every source file intact:
+**dyprys is a distilled fork of [cyprys](https://github.com/mendelcyprys/cyprys),
+built for an agent that operates the tool to search on a user's behalf.** It takes
+cyprys's proven code — the full test suite passes unchanged — and leaves behind
+the research apparatus, keeping a short operating manual in its place.
 
-| | answer is first | in the top five | per query | passages read |
-|---|---:|---:|---:|---:|
-| whole library | **78/110** | **99/110** | 614 ms | 284,627 |
-| routed to 5 books | 68/110 | 93/110 | **91 ms** | **3,605** |
+The measurements behind every default were taken in cyprys, on a 3,453-book /
+284,627-chunk index: the answer is the first result about 6 times in 10 and
+somewhere in the top five about 8 in 10, so results are meant to be read a handful
+at a time; routing reads roughly 1% of the library for about one lost answer in
+twenty-five. cyprys holds the full record and the reasoning; this repo holds the
+tool.
 
-Stage 1 keeps a book holding the answer 109 times in 110, where picking books at
-random scores 16.2%. An exact phrase finds its own passage 19 times in 20.
+## Documentation
 
-**What the corpus is decides what those numbers mean.** It is 117 neuroscience
-books, ~1,650 Project Gutenberg texts and ~1,680 short maths problem sheets — so
-most of it is easy to reject, and a routing figure measured against it is not
-evidence that routing scales to thousands of *similar* books. The one
-same-domain measurement is a 24-question set inside the Gutenberg corpus, where
-routing finds an answering book among a thousand like it 15 times in 24 against
-a 0.2% chance baseline.
-
-Documentation is in two halves, the second continuing from the first:
-
-- [`docs/user/`](docs/user/) — using dyprys: getting text in, embedding it,
-  asking questions, and looking after a library.
-- [`docs/dev/`](docs/dev/) — how it works and why:
-  [architecture](docs/dev/architecture.md),
-  [storage](docs/dev/storage.md),
-  [retrieval](docs/dev/retrieval.md),
-  [measurement](docs/dev/measurement.md),
-  [the optional stages](docs/dev/optional-stages.md), and
-  [what was tried and reversed](docs/dev/history.md).
-- `CLAUDE.md` — the same decisions as working constraints, read automatically by
-  Claude Code sessions in this repo.
+- **`CLAUDE.md`** — the operating manual: which search to run for which kind of
+  request, how to read a result, how to embed and manage a library. Short, and
+  read automatically by an agent on load.
+- **[cyprys](https://github.com/mendelcyprys/cyprys)** — the design argument, the
+  measurement discipline, and the record of what was tried and reversed. Read it
+  when you want to know *why*, not *how*.
 
 ## Getting started
 
@@ -288,10 +275,10 @@ how often routing kept the book flat search itself chose.
 That baseline is not a formality. At 117 books it was 92.3%, which meant a
 reported 109/110 said almost nothing and was quoted for two build steps anyway.
 
-Measurement is the part of this project most worth reading before changing
-anything: [docs/dev/measurement.md](docs/dev/measurement.md) sets out five
-questions to ask of a number, each of which caught a wrong conclusion that had
-already been written down here as a finding.
+Measurement is the part of this project most worth understanding before changing
+anything: cyprys's `docs/dev/measurement.md` sets out five questions to ask of a
+number, each of which caught a wrong conclusion that had already been written down
+as a finding.
 
 ## Layout
 
