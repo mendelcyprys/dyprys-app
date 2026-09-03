@@ -95,6 +95,15 @@ Drafts prose from the passages, but **trusts nothing the model says**:
 
 ## When nothing good comes back
 
+**Hybrid search always returns `k` results at exit 0** — the meaning half fills
+them from the nearest vectors even when the library holds nothing relevant. So a
+non-empty result is not proof of an answer. The deciding test is the **text**: read
+the top passage and judge whether it addresses the question. A probable miss is a
+`vec`-only top hit with a low `cos` *for that search* whose text is off-topic
+(a copyright page, a methods table). When a topic may simply be absent, reach for
+`--summarise` — it says "these passages do not answer the question" and retries
+once with a rephrasing, which is a far stronger absence signal than one weak hit.
+
 1. **`no passage matched`** (exit 1, embedded index) — a lexical-only search found
    no words, or `-c` matched nothing. Rephrase, or drop the scope.
 2. **`nothing embedded yet`** — the index has text but no vectors; it needs

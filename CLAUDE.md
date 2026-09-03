@@ -83,6 +83,12 @@ Occasional, but yours to do when asked. Never do the slow ones unprompted.
 `--chapters` when each directory is one book and its files are chapters.
 
 **Embed** (turns text into vectors — the one slow, expensive step):
+- **You need a model file first.** An embedding model is a local GGUF file passed
+  as `--model PATH.gguf` (remembered after the first run) or set in
+  `$DYPRYS_MODEL`. If none is configured and none is remembered in the index, do
+  not guess a path — ask the user where their model is, or look for `*.gguf` under
+  `~/.cache` (e.g. `~/.cache/qmd/models/`). `dyp models --json` shows what an
+  index already knows.
 - Choose the model deliberately. A **light model** (e.g. jina) builds the index
   several times faster and ranks answers slightly worse — pair it with
   `--rerank` to recover the ranking. A **heavier model** ranks best out of the
@@ -116,9 +122,16 @@ in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
 - **Never invent a citation.** Only quote text `dyp` actually returned; the byte
   offsets are real, use them.
 - **Never start a full embedding run without being asked.** It is long and costly.
-- **Say when a search failed.** If nothing good comes back, retry with different
-  words before concluding the library lacks the answer — a miss under one phrasing
-  is not a miss under all.
+- **Say when a search failed, and know how to tell.** Search *always* returns
+  `k` results — the meaning half fills them even when the library holds nothing
+  relevant — so exit 0 is not "found it". A miss looks like: the top hit is
+  `vec`-only (no `phrase`/`words` agreement), its `cos` is low *for this search*,
+  and — the deciding test — **its `text` does not actually address the question**.
+  Read the top passage before trusting its rank. When a topic may simply be
+  absent, `--summarise` is the surest check: it says "these passages do not answer
+  the question" outright and retries once with a rephrasing before giving up. A
+  refusal that survives rephrasing is strong evidence the library lacks it; a
+  single weak result is not, so retry with different words first.
 - **Prefer the fast path for casual questions, the exact path when it matters.**
   Tell the user which you used when it affects how much to trust the result.
 
