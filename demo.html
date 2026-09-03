@@ -1,0 +1,502 @@
+<title>dyprys</title>
+<meta name="description" content="A local semantic search tool that returns the passage answering your question, shown through real queries and measured results.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
+<style>
+  :root{
+    --ground:#E9ECF1; --surface:#F5F7FA; --raised:#FFFFFF;
+    --ink:#151A21; --ink-soft:#586373; --ink-faint:#8b95a2;
+    --line:#D7DCE3; --line-soft:#E5E9EF;
+    --vec:#0B7E88; --vec-soft:rgba(11,126,136,.12);
+    --lex:#AD6720; --lex-soft:rgba(173,103,32,.12);
+    --good:#2f8f5b; --bad:#c0533f;
+    --term-bg:#0F131A; --term-surface:#171D26; --term-line:#252d38;
+    --term-fg:#C7CFDB; --term-dim:#6C7887; --term-vec:#37C8D4; --term-lex:#E6A662;
+    --shadow:0 1px 2px rgba(20,28,40,.05), 0 8px 30px -12px rgba(20,28,40,.14);
+    --shadow-lift:0 2px 4px rgba(20,28,40,.06), 0 22px 48px -20px rgba(20,28,40,.28);
+    --maxw:1080px;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --ground:#0A0D12; --surface:#11161E; --raised:#151B24;
+    --ink:#E8ECF2; --ink-soft:#98A2B0; --ink-faint:#616B7A;
+    --line:#232A35; --line-soft:#1A202A;
+    --vec:#37C8D4; --vec-soft:rgba(55,200,212,.14);
+    --lex:#E6A662; --lex-soft:rgba(230,166,98,.14);
+    --good:#4bbd81; --bad:#e2735c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 34px -14px rgba(0,0,0,.6);
+    --shadow-lift:0 2px 6px rgba(0,0,0,.5), 0 26px 60px -24px rgba(0,0,0,.75);
+  }}
+  :root[data-theme="dark"]{
+    --ground:#0A0D12; --surface:#11161E; --raised:#151B24;
+    --ink:#E8ECF2; --ink-soft:#98A2B0; --ink-faint:#616B7A;
+    --line:#232A35; --line-soft:#1A202A;
+    --vec:#37C8D4; --vec-soft:rgba(55,200,212,.14);
+    --lex:#E6A662; --lex-soft:rgba(230,166,98,.14);
+    --good:#4bbd81; --bad:#e2735c;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 34px -14px rgba(0,0,0,.6);
+    --shadow-lift:0 2px 6px rgba(0,0,0,.5), 0 26px 60px -24px rgba(0,0,0,.75);
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased;
+    font-weight:400;
+  }
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 28px}
+  @media(max-width:640px){ body{font-size:16px} .wrap{padding:0 20px} }
+
+  h1,h2,h3{font-family:"Fraunces", ui-serif, Georgia, serif; font-weight:500; text-wrap:balance; margin:0}
+  .mono{font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace}
+  .eyebrow{
+    font-family:"IBM Plex Mono", monospace; font-size:.72rem; font-weight:500;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  a{color:inherit}
+
+  /* ---- top bar ---- */
+  header.top{
+    position:sticky; top:0; z-index:20; backdrop-filter:saturate(1.2) blur(8px);
+    background:color-mix(in srgb, var(--ground) 82%, transparent);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .top .wrap{display:flex; align-items:center; gap:16px; height:58px}
+  .brand{font-family:"Fraunces", serif; font-weight:600; font-size:1.28rem; letter-spacing:-.01em}
+  .brand .dot{color:var(--vec)}
+  .top .spacer{flex:1}
+  .top .cmd{font-family:"IBM Plex Mono", monospace; font-size:.82rem; color:var(--ink-soft); display:none}
+  @media(min-width:720px){ .top .cmd{display:block} }
+  .toggle{
+    font:inherit; font-family:"IBM Plex Mono", monospace; font-size:.72rem;
+    letter-spacing:.05em; cursor:pointer; color:var(--ink-soft);
+    background:var(--surface); border:1px solid var(--line); border-radius:7px;
+    padding:6px 11px; line-height:1;
+  }
+  .toggle:hover{color:var(--ink); border-color:var(--ink-faint)}
+
+  /* ---- hero ---- */
+  .hero{padding:76px 0 30px}
+  .hero .eyebrow{margin-bottom:20px}
+  .hero h1{font-size:clamp(2.5rem,6vw,4.1rem); line-height:1.02; letter-spacing:-.02em}
+  .hero h1 em{font-style:italic; font-weight:400; color:var(--vec)}
+  .hero .lede{
+    margin:22px 0 0; max-width:36em; color:var(--ink-soft); font-size:1.12rem; line-height:1.6;
+  }
+  .hero .lede b{color:var(--ink); font-weight:600}
+  .runline{
+    margin-top:26px; display:inline-flex; align-items:center; gap:12px; flex-wrap:wrap;
+    font-family:"IBM Plex Mono", monospace; font-size:.9rem; color:var(--ink-soft);
+    background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:10px 15px;
+  }
+  .runline .p{color:var(--vec)}
+  .runline b{color:var(--ink); font-weight:500}
+
+  /* ---- terminal demo ---- */
+  .demo{margin:40px 0 8px}
+  .tabs{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:0; position:relative; z-index:2}
+  .tab{
+    font-family:"IBM Plex Mono", monospace; font-size:.78rem; letter-spacing:.01em;
+    cursor:pointer; border:1px solid var(--line); border-bottom:none;
+    background:var(--surface); color:var(--ink-soft);
+    padding:11px 15px 12px; border-radius:9px 9px 0 0; line-height:1.1;
+    display:flex; align-items:center; gap:8px; transition:color .15s, background .15s;
+  }
+  .tab .k{width:8px; height:8px; border-radius:50%; background:var(--ink-faint); flex:none}
+  .tab[aria-selected="true"]{background:var(--term-bg); color:#fff; border-color:var(--term-line)}
+  .tab[aria-selected="true"] .k.vec{background:var(--term-vec)}
+  .tab[aria-selected="true"] .k.lex{background:var(--term-lex)}
+  .tab[aria-selected="true"] .k.miss{background:var(--bad)}
+  .tab:focus-visible{outline:2px solid var(--vec); outline-offset:2px}
+
+  .term{
+    background:var(--term-bg); border:1px solid var(--term-line); border-radius:0 12px 12px 12px;
+    box-shadow:var(--shadow-lift); overflow:hidden;
+  }
+  .term .bar{
+    display:flex; align-items:center; gap:7px; padding:12px 16px; border-bottom:1px solid var(--term-line);
+  }
+  .term .bar i{width:11px; height:11px; border-radius:50%; background:#3a4350; display:block}
+  .term .bar .ttl{margin-left:8px; font-family:"IBM Plex Mono", monospace; font-size:.74rem; color:var(--term-dim)}
+  .term .body{padding:20px 22px 22px; overflow-x:auto}
+  .term pre{margin:0; font-family:"IBM Plex Mono", monospace; font-size:.86rem; line-height:1.7; color:var(--term-fg); white-space:pre}
+  @media(max-width:640px){ .term pre{font-size:.76rem; white-space:pre-wrap; word-break:break-word} .term .body{padding:16px} }
+  .term .q{color:#eef2f7}
+  .term .prompt{color:var(--term-vec)}
+  .term .dim{color:var(--term-dim)}
+  .term .vec{color:var(--term-vec); font-weight:500}
+  .term .lex{color:var(--term-lex); font-weight:500}
+  .term .miss{color:var(--bad); font-weight:500}
+  .term .hit{color:#e9edf3}
+  .term .cursor{display:inline-block; width:9px; height:1.05em; background:var(--term-vec); vertical-align:-2px; animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media(prefers-reduced-motion:reduce){ .term .cursor{animation:none} }
+
+  .readout{
+    display:flex; gap:14px; align-items:flex-start; margin-top:14px; padding:0 3px;
+    font-size:.95rem; color:var(--ink-soft);
+  }
+  .readout .badge{
+    font-family:"IBM Plex Mono", monospace; font-size:.7rem; letter-spacing:.05em; text-transform:uppercase;
+    padding:4px 9px; border-radius:20px; flex:none; font-weight:500;
+  }
+  .readout .badge.vec{background:var(--vec-soft); color:var(--vec)}
+  .readout .badge.lex{background:var(--lex-soft); color:var(--lex)}
+  .readout .badge.miss{background:color-mix(in srgb,var(--bad) 15%,transparent); color:var(--bad)}
+  .readout p{margin:0; line-height:1.55}
+  .readout b{color:var(--ink); font-weight:600}
+
+  /* ---- section frame ---- */
+  section.band{padding:64px 0; border-top:1px solid var(--line-soft)}
+  .sechead{max-width:44em; margin-bottom:34px}
+  .sechead .eyebrow{display:block; margin-bottom:14px}
+  .sechead h2{font-size:clamp(1.7rem,3.4vw,2.3rem); line-height:1.12; letter-spacing:-.015em}
+  .sechead p{margin:14px 0 0; color:var(--ink-soft); font-size:1.06rem; max-width:40em}
+
+  /* ---- decoded result line ---- */
+  .decode{
+    background:var(--term-bg); border:1px solid var(--term-line); border-radius:12px;
+    padding:30px 26px 26px; box-shadow:var(--shadow); overflow-x:auto;
+  }
+  .decode .line{font-family:"IBM Plex Mono", monospace; font-size:clamp(.86rem,2.3vw,1.18rem); color:var(--term-fg); white-space:nowrap}
+  .decode .tok{position:relative; padding:2px 3px; border-radius:4px}
+  .decode .tok.vec{color:var(--term-vec)}
+  .decode .tok.lex{color:var(--term-lex)}
+  .decode .tok.cos{color:#e9edf3}
+  .decode .tok.loc{color:var(--term-dim)}
+  .annos{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:20px 26px; margin-top:30px}
+  .anno h4{margin:0 0 4px; font-family:"IBM Plex Mono", monospace; font-size:.8rem; letter-spacing:.02em}
+  .anno.vec h4{color:var(--vec)} .anno.lex h4{color:var(--lex)}
+  .anno.cos h4{color:var(--ink)} .anno.loc h4{color:var(--ink)}
+  .anno p{margin:0; font-size:.92rem; color:var(--ink-soft); line-height:1.5}
+
+  /* ---- pipeline ---- */
+  .pipe{display:grid; gap:16px}
+  .pstage{
+    display:grid; grid-template-columns:auto 1fr; gap:18px; align-items:start;
+    background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:20px 22px;
+  }
+  .pstage .n{
+    font-family:"IBM Plex Mono", monospace; font-weight:600; font-size:.9rem;
+    width:34px; height:34px; border-radius:9px; display:grid; place-items:center; flex:none;
+    background:var(--raised); border:1px solid var(--line); color:var(--ink-soft);
+  }
+  .pstage h3{font-family:"IBM Plex Sans", sans-serif; font-weight:600; font-size:1.02rem; margin:2px 0 5px}
+  .pstage p{margin:0; color:var(--ink-soft); font-size:.96rem}
+  .pstage .split{display:flex; gap:10px; margin-top:12px; flex-wrap:wrap}
+  .chip{font-family:"IBM Plex Mono", monospace; font-size:.74rem; padding:5px 10px; border-radius:7px; font-weight:500}
+  .chip.vec{background:var(--vec-soft); color:var(--vec)}
+  .chip.lex{background:var(--lex-soft); color:var(--lex)}
+  .chip.plain{background:var(--raised); color:var(--ink-soft); border:1px solid var(--line)}
+
+  /* ---- stats ---- */
+  .stats{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden}
+  @media(max-width:720px){ .stats{grid-template-columns:repeat(2,1fr)} }
+  .stat{background:var(--surface); padding:22px 20px}
+  .stat .v{font-family:"Fraunces", serif; font-weight:500; font-size:clamp(1.7rem,3.4vw,2.35rem); letter-spacing:-.02em; line-height:1; font-variant-numeric:tabular-nums}
+  .stat .l{margin-top:9px; font-size:.86rem; color:var(--ink-soft); line-height:1.35}
+
+  /* recall chart + trade table */
+  .measure{display:grid; grid-template-columns:1.05fr 1fr; gap:30px; margin-top:34px; align-items:start}
+  @media(max-width:820px){ .measure{grid-template-columns:1fr; gap:26px} }
+  .panel{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:24px}
+  .panel h3{font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:1rem; margin:0 0 3px}
+  .panel .sub{font-size:.86rem; color:var(--ink-faint); margin:0 0 20px}
+  .bars{display:grid; gap:16px}
+  .barrow{display:grid; grid-template-columns:74px 1fr 46px; align-items:center; gap:12px}
+  .barrow .lab{font-family:"IBM Plex Mono",monospace; font-size:.8rem; color:var(--ink-soft)}
+  .track{height:26px; background:var(--line-soft); border-radius:6px; overflow:hidden}
+  .fill{height:100%; border-radius:6px; background:linear-gradient(90deg, var(--vec), color-mix(in srgb,var(--vec) 70%, #7fd7de))}
+  .barrow .pct{font-family:"IBM Plex Mono",monospace; font-size:.86rem; text-align:right; font-variant-numeric:tabular-nums; color:var(--ink)}
+  .note{margin:18px 0 0; font-size:.86rem; color:var(--ink-soft); line-height:1.5}
+
+  table.trade{width:100%; border-collapse:collapse; font-size:.92rem}
+  table.trade th, table.trade td{text-align:right; padding:11px 8px; border-bottom:1px solid var(--line-soft); font-variant-numeric:tabular-nums}
+  table.trade th:first-child, table.trade td:first-child{text-align:left; color:var(--ink-soft); font-weight:400}
+  table.trade thead th{font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); font-weight:500; border-bottom:1px solid var(--line)}
+  table.trade tbody tr:last-child td{border-bottom:none}
+  table.trade .em{color:var(--vec); font-weight:600}
+  table.trade .mono{font-family:"IBM Plex Mono",monospace}
+
+  /* ---- guarantees ---- */
+  .guars{display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:14px; overflow:hidden}
+  @media(max-width:720px){ .guars{grid-template-columns:1fr} }
+  .guar{background:var(--surface); padding:26px 24px}
+  .guar .g-ico{font-family:"IBM Plex Mono",monospace; font-size:.72rem; letter-spacing:.08em; color:var(--vec); text-transform:uppercase; font-weight:600}
+  .guar h3{font-family:"IBM Plex Sans",sans-serif; font-weight:600; font-size:1.08rem; margin:12px 0 8px}
+  .guar p{margin:0; color:var(--ink-soft); font-size:.96rem; line-height:1.55}
+  .guar code{font-family:"IBM Plex Mono",monospace; font-size:.86em; background:var(--vec-soft); color:var(--vec); padding:1px 5px; border-radius:4px}
+
+  /* ---- footer / run ---- */
+  footer{border-top:1px solid var(--line-soft); padding:60px 0 72px}
+  .runcard{background:var(--term-bg); border:1px solid var(--term-line); border-radius:13px; padding:24px 24px 22px; box-shadow:var(--shadow); overflow-x:auto}
+  .runcard pre{margin:0; font-family:"IBM Plex Mono",monospace; font-size:.86rem; line-height:1.8; color:var(--term-fg); white-space:pre}
+  .runcard .c{color:var(--term-dim)} .runcard .p{color:var(--term-vec)}
+  .foot-meta{display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-top:26px; font-size:.86rem; color:var(--ink-faint)}
+  .foot-meta .mono{font-family:"IBM Plex Mono",monospace}
+  .invariant{margin:0 0 30px; font-size:1.02rem; color:var(--ink-soft); max-width:42em; line-height:1.6}
+  .invariant b{color:var(--ink); font-weight:600}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <span class="brand">dyprys<span class="dot">.</span></span>
+    <span class="spacer"></span>
+    <span class="cmd mono">local · offline · <span style="color:var(--vec)">dyp ask</span></span>
+    <button class="toggle" id="themeBtn" type="button" aria-label="Switch theme">theme</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <span class="eyebrow">Local semantic search · book-length texts</span>
+      <h1>Ask a question.<br>Get the <em>passage</em> that answers it.</h1>
+      <p class="lede">Not a ranked list of books to go and read — the paragraph itself, with the
+        file and byte it came from. It runs entirely on your machine and stays fast from one book
+        to <b>several thousand</b>.</p>
+      <span class="runline mono"><span class="p">$</span> dyp ask <b>"what insulates nerve fibres so signals travel faster"</b></span>
+
+      <div class="demo">
+        <div class="tabs" role="tablist" aria-label="Example queries">
+          <button class="tab" role="tab" id="tab0" aria-selected="true" aria-controls="panel"><span class="k vec"></span>describe a concept</button>
+          <button class="tab" role="tab" id="tab1" aria-selected="false" aria-controls="panel"><span class="k lex"></span>quote a line</button>
+          <button class="tab" role="tab" id="tab2" aria-selected="false" aria-controls="panel"><span class="k miss"></span>when it isn't there</button>
+        </div>
+        <div class="term" role="tabpanel" id="panel" aria-live="polite">
+          <div class="bar"><i></i><i></i><i></i><span class="ttl mono" id="termttl">dyp — neuroscience shelf</span></div>
+          <div class="body"><pre id="termout"></pre></div>
+        </div>
+        <div class="readout"><span class="badge vec" id="rbadge">vec 1</span><p id="rtext"></p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="sechead">
+        <span class="eyebrow">reading a result</span>
+        <h2>Every line tells you why it matched</h2>
+        <p>Two searches run on every question and their results are merged: a <b style="color:var(--vec)">meaning</b>
+          search that understands a description, and a <b style="color:var(--lex)">keyword</b> search that finds
+          your exact words. The result line says which one found the passage — and how sure it is.</p>
+      </div>
+      <div class="decode">
+        <div class="line mono">
+          <span class="tok cos">[cos 0.35</span> · <span class="tok vec">vec 1</span> · <span class="tok lex">phrase 1</span><span class="tok cos">]</span>
+          <span class="hit" style="color:#e9edf3"> Principles.of.Neural.Science</span>
+          <span class="tok loc">  …:523017</span>
+        </div>
+        <div class="annos">
+          <div class="anno cos"><h4>cos 0.35</h4><p>Closeness in meaning, 0–1. Worth showing, not worth ranking on — here a literal match scores low yet is exactly right.</p></div>
+          <div class="anno vec"><h4>vec 1</h4><p>The meaning half ranked it first. It matched what the question is <em>about</em>, not the words used.</p></div>
+          <div class="anno lex"><h4>phrase 1</h4><p>The keyword half found your words <em>in order</em> — a literal hit. The surest kind of match for a remembered line.</p></div>
+          <div class="anno loc"><h4>…:523017</h4><p>The file and the exact byte. Hand it to the reader; it opens the source. Nothing is copied or moved.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="sechead">
+        <span class="eyebrow">how a question finds its answer</span>
+        <h2>Two halves, then two stages</h2>
+        <p>The two halves keep search honest — meaning alone misses a remembered phrase, keywords
+          alone miss a description. Routing keeps it fast: it reads about one book in seventy
+          instead of the whole library.</p>
+      </div>
+      <div class="pipe">
+        <div class="pstage">
+          <span class="n">1</span>
+          <div>
+            <h3>Route</h3>
+            <p>Each book is profiled into a handful of directions. A query scores every book by its best one and keeps only the closest few — no approximate index, so nothing is lost that a full scan would have found.</p>
+            <div class="split"><span class="chip plain">3,453 books → 5</span><span class="chip plain">1.4% read</span></div>
+          </div>
+        </div>
+        <div class="pstage">
+          <span class="n">2</span>
+          <div>
+            <h3>Search both halves</h3>
+            <p>Exact cosine over the routed passages for meaning, and a keyword index for literal words — the exact-phrase probe still sweeps the whole library, so a remembered sentence is never routed past.</p>
+            <div class="split"><span class="chip vec">vector · meaning</span><span class="chip lex">BM25 · keywords</span></div>
+          </div>
+        </div>
+        <div class="pstage">
+          <span class="n">3</span>
+          <div>
+            <h3>Fuse by rank</h3>
+            <p>The two rankings combine by position, not score — a cosine and a keyword score aren't comparable numbers. What surfaces is the passage both halves, in their own terms, put near the top.</p>
+            <div class="split"><span class="chip plain">reciprocal rank fusion</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="sechead">
+        <span class="eyebrow">measured, not claimed</span>
+        <h2>Every number here was run, not asserted</h2>
+        <p>On a frozen index of 3,453 books and 284,627 passages — a mix of neuroscience,
+          literature and reference — with the evaluation scoring whether the returned <em>passage</em>
+          actually contains the answer, not merely the right book.</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="v">3,453</div><div class="l">books indexed, end to end</div></div>
+        <div class="stat"><div class="v">284,627</div><div class="l">passages, searched in full</div></div>
+        <div class="stat"><div class="v">91<span style="font-size:.5em"> ms</span></div><div class="l">per routed query</div></div>
+        <div class="stat"><div class="v">1.4<span style="font-size:.5em">%</span></div><div class="l">of the library actually read</div></div>
+      </div>
+
+      <div class="measure">
+        <div class="panel">
+          <h3>Read a handful, not just the first</h3>
+          <p class="sub">Where the answer lands, over 300 questions</p>
+          <div class="bars">
+            <div class="barrow"><span class="lab">top&nbsp;1</span><div class="track"><div class="fill" style="width:59%"></div></div><span class="pct">59%</span></div>
+            <div class="barrow"><span class="lab">top&nbsp;5</span><div class="track"><div class="fill" style="width:80%"></div></div><span class="pct">80%</span></div>
+            <div class="barrow"><span class="lab">top&nbsp;20</span><div class="track"><div class="fill" style="width:87%"></div></div><span class="pct">87%</span></div>
+          </div>
+          <p class="note">The single most useful thing to know: the answer is first about six times in ten, and in the top five about eight. Results are meant to be read a few at a time.</p>
+        </div>
+        <div class="panel">
+          <h3>What routing trades</h3>
+          <p class="sub">Whole library vs. the routed fast path</p>
+          <table class="trade">
+            <thead><tr><th></th><th>full scan</th><th>routed</th></tr></thead>
+            <tbody>
+              <tr><td>answer in top 5</td><td class="mono">80%</td><td class="mono em">77%</td></tr>
+              <tr><td>per query</td><td class="mono">597 ms</td><td class="mono em">91 ms</td></tr>
+              <tr><td>passages read</td><td class="mono">284,627</td><td class="mono em">4,027</td></tr>
+              <tr><td>kept the answer's book</td><td class="mono">—</td><td class="mono em">286 / 300</td></tr>
+            </tbody>
+          </table>
+          <p class="note">Reading 1.4% of the library costs about one answer in twenty-five, for a six-fold speed-up. A random 5 books would keep the answer only 9.8% of the time — routing, 95%.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <div class="sechead">
+        <span class="eyebrow">what it guarantees</span>
+        <h2>Built to be trusted with a library you can't re-check</h2>
+      </div>
+      <div class="guars">
+        <div class="guar">
+          <span class="g-ico">never shows what it can't prove</span>
+          <h3>A quote is the real bytes, or nothing</h3>
+          <p>Every passage is verified against a stored hash before it is shown. Edit a book and the changed passages are withheld — never displayed as stale — while the rest keep their vectors, matched by content, not position.</p>
+        </div>
+        <div class="guar">
+          <span class="g-ico">verified under real crashes</span>
+          <h3>Interrupted, never corrupted</h3>
+          <p>Embedding is resumable to a single passage: a vector is written before the count that claims it. Killed mid-run with <code>SIGKILL</code> at 73 of 195 passages, then resumed — every vector came back bit-identical to a clean rebuild.</p>
+        </div>
+        <div class="guar">
+          <span class="g-ico">drafts you can check</span>
+          <h3>An answer, with its receipts</h3>
+          <p>Ask it to write a summary and every quotation is checked character-by-character against the source and cut if it fails. Locations come from the index, never the model — and when the library has no answer, it says so and retries once itself.</p>
+        </div>
+        <div class="guar">
+          <span class="g-ico">for a person or an agent</span>
+          <h3>Speaks JSON as fluently as prose</h3>
+          <p>Every command — search, status, health, history — takes <code>--json</code>, so an assistant can drive the whole tool structurally. A short operating manual travels with it, telling the agent which search to run when.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p class="invariant"><b>One idea carries the design:</b> a passage is the unit of everything. It has an id, that id <em>is</em> its row in the vector file, and ids are dense per book — so a book, a chapter or a shelf is a contiguous slice of one array, reached with a single memory-mapped read.</p>
+      <div class="runcard">
+        <pre><span class="c"># point it at a folder of text, once</span>
+<span class="p">$</span> dyp add ~/library
+<span class="p">$</span> dyp embed --model model.gguf   <span class="c"># the one slow step, resumable</span>
+<span class="p">$</span> dyp route
+
+<span class="c"># then ask, for the rest of the library's life</span>
+<span class="p">$</span> dyp ask <span style="color:#e9edf3">"why can a nerve impulse only travel one way"</span></pre>
+      </div>
+      <div class="foot-meta">
+        <span>Two dependencies. <span class="mono">llama-cpp-python</span> and <span class="mono">numpy</span>. Nothing leaves the machine.</span>
+        <span class="mono">dyprys · MIT</span>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<script>
+  // theme toggle — cycles the explicit stamp; default follows the OS
+  (function(){
+    var btn=document.getElementById('themeBtn'), root=document.documentElement;
+    btn.addEventListener('click',function(){
+      var cur=root.getAttribute('data-theme');
+      var sysDark=window.matchMedia('(prefers-color-scheme:dark)').matches;
+      var next = cur ? (cur==='dark'?'light':'dark') : (sysDark?'light':'dark');
+      root.setAttribute('data-theme',next);
+    });
+  })();
+
+  // real captured dyprys output — three queries, one honest miss
+  var EX=[
+    { ttl:"dyp — neuroscience shelf",
+      q:'what insulates nerve fibres so signals travel faster',
+      cos:'0.49', prov:[['vec','vec 1']],
+      book:'Neuroscience.Science.of.the.Brain', chunk:'chunk 7', loc:'~/books/Neuroscience.Science.of.the.Brain.txt:21454',
+      text:'…the movement of energy along a firework sparkler after it is lit at one end. The first ignition triggers very rapid local sparks of activity…',
+      badge:['vec','vec 1'],
+      say:'The book never says <b>"insulate"</b> — it explains myelin with a sparkler. The <b>meaning</b> half found it anyway.' },
+    { ttl:"dyp — neuroscience shelf",
+      q:'the most complex organ of the body, and arguably the most complex thing on earth',
+      cos:'0.35', prov:[['vec','vec 1'],['lex','phrase 1']],
+      book:'Neuroscience.Science.of.the.Brain', chunk:'chunk 2', loc:'~/books/Neuroscience.Science.of.the.Brain.txt:3562',
+      text:'…billions of tiny cells. It enables us to sense the world around us, to think and to talk. The human brain is the most complex organ of the body, and arguably the most complex thing…',
+      badge:['lex','phrase 1'],
+      say:'A half-remembered line, quoted back. Note the low <b>cos 0.35</b> — yet <b>phrase 1</b> nails the exact sentence.' },
+    { ttl:"dyp — neuroscience shelf",
+      q:'how to bake sourdough bread with a wild yeast starter',
+      cos:'0.16', prov:[['miss','vec 1']],
+      book:'Wiley.Information.Processing…', chunk:'chunk 141', loc:'~/books/Wiley.Information.Processing.txt:64361',
+      text:'© 2010 John Wiley & Sons, Inc.  32  MATERIALS AND METHODS  Substrates: d-Glucose-6-phosphate, Sigma…',
+      badge:['miss','no real match'],
+      say:'A neuroscience shelf has no sourdough. The top hit scores a feeble <b>0.16</b> on a copyright page — and <code style="font-family:inherit">--summarise</code> reports the passages don\'t answer.' }
+  ];
+
+  function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  function render(i){
+    var e=EX[i];
+    var prov = e.prov.map(function(p){return '<span class="'+p[0]+'">'+esc(p[1])+'</span>'}).join('<span class="dim"> · </span>');
+    var html =
+      '<span class="prompt">$</span> <span class="q">dyp ask "'+esc(e.q)+'"</span>\n\n'+
+      '<span class="dim">1.</span> <span class="dim">[cos </span><span class="hit">'+esc(e.cos)+'</span><span class="dim"> · </span>'+prov+'<span class="dim">]</span>  '+esc(e.book)+' <span class="dim">('+esc(e.chunk)+')</span>\n'+
+      '   <span class="hit">'+esc(e.text)+'</span>\n'+
+      '   <span class="dim">'+esc(e.loc)+'</span><span class="cursor"></span>';
+    document.getElementById('termout').innerHTML=html;
+    document.getElementById('termttl').textContent=e.ttl;
+    var b=document.getElementById('rbadge');
+    b.className='badge '+e.badge[0]; b.textContent=e.badge[1];
+    document.getElementById('rtext').innerHTML=e.say;
+  }
+  var tabs=[document.getElementById('tab0'),document.getElementById('tab1'),document.getElementById('tab2')];
+  tabs.forEach(function(t,i){
+    t.addEventListener('click',function(){
+      tabs.forEach(function(x){x.setAttribute('aria-selected','false')});
+      t.setAttribute('aria-selected','true'); render(i);
+    });
+    t.addEventListener('keydown',function(ev){
+      if(ev.key==='ArrowRight'||ev.key==='ArrowLeft'){
+        var d=ev.key==='ArrowRight'?1:-1, n=(i+d+tabs.length)%tabs.length;
+        tabs[n].focus(); tabs[n].click();
+      }
+    });
+  });
+  render(0);
+</script>
