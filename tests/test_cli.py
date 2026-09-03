@@ -99,12 +99,11 @@ def test_ask_and_eval_agree_on_every_flag_they_share():
     ask, ev = _flags("ask"), _flags("eval")
     # eval alone takes the question set and the arms to compare.
     eval_only = {"--questions", "--lexical", "--compare"}
-    # ask alone drafts an answer from what was found. It changes how results are
-    # presented and not which results they are, so there is nothing in it for a
-    # retrieval harness to measure — any *other* ask-only flag is drift.
-    # All three change how results are *presented*, not which results they are,
-    # so a retrieval harness has nothing to measure in any of them.
-    ask_only = {"--summarise", "--full", "--quiet", "-q"}
+    # These change how results are *presented*, not which results they are, so a
+    # retrieval harness has nothing to measure in any of them — any *other*
+    # ask-only flag is drift. --json is the machine-readable presentation, --full
+    # and --quiet the human one, --summarise drafts prose from what was found.
+    ask_only = {"--summarise", "--full", "--json", "--quiet", "-q"}
 
     assert ask - ev == ask_only, f"unexpected ask-only flags: {sorted(ask - ev - ask_only)}"
     assert ev - ask == eval_only, f"unexpected eval-only flags: {sorted(ev - ask - eval_only)}"
@@ -363,7 +362,7 @@ def test_ask_only_flags_are_the_presentation_ones():
     """Anything else appearing only on `ask` is drift between it and `eval`."""
     ask, ev = _flags("ask"), _flags("eval")
 
-    assert ask - ev == {"--summarise", "--full", "--quiet", "-q"}
+    assert ask - ev == {"--summarise", "--full", "--json", "--quiet", "-q"}
 
 
 def test_a_question_and_its_answer_are_kept(tmp_path):
@@ -539,3 +538,41 @@ def test_a_padded_query_is_stripped_not_rejected(tmp_path):
     # The strip happens inside _ask; here we assert the parser keeps it verbatim
     # so _ask is the single place that owns the cleaning.
     assert args.question == "  synapse  "
+
+
+def test_json_payload_shape_is_stable_and_parseable():
+    """The machine-readable form an agent parses. Built as a pure function from
+    resolved passages, so it needs no model or index to check."""
+    import json
+
+    from dyprys.cli import results_as_json
+    from dyprys.search import Passage
+    from dyprys.text import EXACT, MISSING
+
+    passages = [
+        Passage(chunk_id=21482, score=0.03, title="Principles", path="/b/p.txt",
+                chapter=0, text="the axon leaves the soma", state=EXACT, offset=523017),
+        Passage(chunk_id=99, score=0.01, title="Other", path="/b/o.txt",
+                chapter=3, text=None, state=MISSING, offset=0),
+    ]
+    why = {21482: "vec 1 · phrase 1", 99: "words 2"}
+    cosine = {21482: 0.5199}
+
+    payload = results_as_json("what is an axon", "hybrid", True, 0.0141, 91.23,
+                              passages, why, cosine)
+    # round-trips as JSON
+    back = json.loads(json.dumps(payload))
+    assert back["query"] == "what is an axon"
+    assert back["mode"] == "hybrid" and back["routed"] is True
+    assert back["scanned_fraction"] == 0.0141 and back["elapsed_ms"] == 91.2
+
+    first, second = back["results"]
+    assert first == {
+        "rank": 1, "chunk_id": 21482, "book": "Principles", "chapter": None,
+        "path": "/b/p.txt", "offset": 523017, "cos": 0.5199,
+        "provenance": "vec 1 · phrase 1", "state": EXACT,
+        "text": "the axon leaves the soma",
+    }
+    # an unproved passage carries text=null and its state, not a fabricated quote
+    assert second["text"] is None and second["state"] == MISSING
+    assert second["cos"] is None and second["chapter"] == 4

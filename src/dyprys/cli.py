@@ -192,6 +192,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="results only — no running commentary on stderr")
     ask.add_argument("--full", action="store_true",
                      help="print each passage whole, instead of its query-dense part")
+    ask.add_argument("--json", action="store_true",
+                     help="emit results as JSON for a program to parse, not the "
+                          "human display")
     ask.add_argument(
         "--summarise", nargs="?", const=True, metavar="MODEL",
         help="draft an answer from the passages, keeping only quotations that "
@@ -1393,6 +1396,39 @@ def _load_model(conn, directory, model_arg):
     return embedder, model_id, store_for(conn, directory, model_id, embedder.dim)
 
 
+def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, cosine):
+    """The `--json` payload, built from resolved passages and nothing else.
+
+    Kept a pure function so it can be tested without a model or an index: it turns
+    what a search already produced into the shape an agent parses. `text` is null
+    when the source could not be proved, and `state` says why; `provenance` is the
+    tool's own rank signal ("vec 1 · phrase 1"), which carries more than a single
+    fused score could.
+    """
+    results = []
+    for rank, p in enumerate(passages, 1):
+        results.append({
+            "rank": rank,
+            "chunk_id": p.chunk_id,
+            "book": p.title,
+            "chapter": (p.chapter + 1) if p.chapter else None,
+            "path": str(p.path),
+            "offset": p.offset,
+            "cos": round(cosine[p.chunk_id], 4) if p.chunk_id in cosine else None,
+            "provenance": why.get(p.chunk_id),
+            "state": p.state,
+            "text": p.text,
+        })
+    return {
+        "query": question,
+        "mode": mode,
+        "routed": routed,
+        "scanned_fraction": round(scanned, 4),
+        "elapsed_ms": round(elapsed_ms, 1),
+        "results": results,
+    }
+
+
 def _ask(conn, directory, args) -> int:
     # An empty or whitespace query embeds to a meaningless vector and matches no
     # words, so hybrid search returns whatever the vector half drifts to -- noise
@@ -1434,6 +1470,18 @@ def _ask(conn, directory, args) -> int:
     elapsed = (time.time() - started) * 1000
     reached = router.last.get("books") if router else books
     share = scanned_fraction(conn, model_id, reached)
+
+    # The machine-readable form. An agent driving dyp parses this instead of
+    # scraping the human display, which carries ANSI codes and middle-elided
+    # titles. Empty results are valid JSON, not a stderr message, so a caller
+    # gets one shape to parse either way; the exit code still says hit or miss.
+    if getattr(args, "json", False):
+        import json as _json
+        payload = results_as_json(
+            args.question, args.mode, bool(args.route), share, elapsed,
+            resolve(conn, hits), search.why, search.cosine)
+        print(_json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0 if payload["results"] else 1
 
     if not hits:
         embedded = conn.execute(

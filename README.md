@@ -49,7 +49,7 @@ Documentation is in two halves, the second continuing from the first:
 ## Getting started
 
 ```sh
-git clone git@github.com:mendeldyprys/dyprys.git
+git clone git@github.com:mendelcyprys/dyprys.git
 cd dyprys
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
