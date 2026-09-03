@@ -126,13 +126,25 @@ in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
 
 ## Getting the machine-readable form
 
+Parse `--json`, don't scrape the pretty output (it carries ANSI codes and
+middle-elided titles). Available on `ask` **and on the inspection commands** —
+`status`, `check`, `books`, `models`, `library list` — so you can drive both
+searching and administration structurally:
+
+- `dyp status --json` → is it embedded, and how far? (`.models[].coverage`)
+- `dyp check --json` → anything drifted? (`.drift.clean`, `.models[].outstanding`)
+- `dyp books --json` / `dyp models --json` → what is here, per-book / per-model
+- `dyp library list --json` → the libraries, sizes and defaults
+
 `dyp ask "…" --json` returns each result as
-`{rank, chunk_id, book, chapter, path, offset, cos, provenance, state, text}` —
-parse this rather than scraping the pretty output when acting on results
-programmatically. `provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`);
-`text` is `null` when the passage could not be proved against its stored hash, and
-`state` says why — **never quote a passage whose `text` is null**. Full schema in
-`docs/searching.md`.
+`{rank, chunk_id, book, chapter, path, offset, cos, provenance, state, text}`.
+`provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`); `text` is `null` when
+the passage could not be proved against its stored hash, and `state` says why —
+**never quote a passage whose `text` is null**. Full schema in `docs/searching.md`.
+
+If a JSON tool like `jq` is on the machine, piping through it is fine
+(`dyp status --json | jq .models[0].coverage`); the output is plain JSON on
+stdout, one object, exit code 0 on success and 1 on an empty/no-result listing.
 
 ---
 

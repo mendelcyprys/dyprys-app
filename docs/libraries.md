@@ -33,6 +33,9 @@ Holds names and paths only — a small JSON file, written atomically and moved
 aside if ever found corrupt. Losing it costs the names and nothing else; every
 library still opens with `--data DIR`.
 
+`dyp library list --json` emits the libraries structurally
+(`[{name, path, default, exists, books, chunks, models[]}]`) for programmatic use.
+
 ## Several libraries over shared text
 
 Two indexes can point at one folder of text; nothing is copied, so it costs only

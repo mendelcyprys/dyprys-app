@@ -238,8 +238,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     bk = sub.add_parser("books", help="list books, or show one in detail")
     bk.add_argument("pattern", nargs="?", help="show matching books in full")
+    bk.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
 
     md = sub.add_parser("models", help="embedding models: coverage and disk")
+    md.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
     for _role, _env, _flag, _key, _what in (
         ("expansion", "DYPRYS_EXPANDER", "", "expander", ""),
         ("summarising", "DYPRYS_SUMMARISER", "", "summariser", ""),
@@ -293,7 +295,8 @@ def build_parser() -> argparse.ArgumentParser:
     libsub = lib.add_subparsers(dest="action")
     la = libsub.add_parser("add", help="register a directory under a name")
     la.add_argument("name"); la.add_argument("path", type=Path)
-    libsub.add_parser("list", help="every library, and which is the default")
+    ll = libsub.add_parser("list", help="every library, and which is the default")
+    ll.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
     lr = libsub.add_parser("remove", help="forget a name; the files stay")
     lr.add_argument("name")
     lr.add_argument("--delete", action="store_true",
@@ -302,7 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     lu = libsub.add_parser("use", help="make one the default")
     lu.add_argument("name")
 
-    sub.add_parser("status", help="what is in the index")
+    st = sub.add_parser("status", help="what is in the index")
+    st.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
     ak = sub.add_parser("asked", help="questions you have asked, and what came back")
     ak.add_argument("which", nargs="?", type=int,
                     help="show one in full, by the number `dyp asked` gives it")
@@ -323,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="how often to refresh (default 2)")
 
     check = sub.add_parser("check", help="what has drifted and what work is outstanding")
+    check.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
     check.add_argument(
         "--deep",
         action="store_true",
@@ -379,9 +384,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "watch":
             return _watch(conn, _where(args), args.every)
         if args.command == "status":
-            return _status(conn)
+            return _status(conn, args.json)
         if args.command == "check":
-            return _check(conn, args.deep)
+            return _check(conn, args.deep, args.json)
         if args.command == "embed":
             return _embed(conn, _where(args), args)
         if args.command == "ask":
@@ -389,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "eval":
             return _eval(conn, _where(args), args)
         if args.command == "books":
-            return _books(conn, args.pattern)
+            return _books(conn, args.pattern, args.json)
         if args.command == "models":
             return _models(conn, _where(args), args)
         if args.command == "lexical":
@@ -916,6 +921,25 @@ def _library(args, parser) -> int:
         return 0
 
     entries = registry.libraries()
+
+    if getattr(args, "json", False):
+        libs = []
+        for e in entries:
+            row = {"name": e.name, "path": str(e.path), "default": e.is_default,
+                   "exists": e.exists}
+            held = registry.summarise(e.path) if e.exists else None
+            if held is not None:
+                row.update(books=held.books, chunks=held.chunks, models=[
+                    {"name": name, "embedded": done, "total": whole,
+                     "coverage": (done / whole) if whole else 0.0}
+                    for name, done, whole in held.models])
+            libs.append(row)
+        return _emit_json({
+            "libraries": libs,
+            "registry_path": str(registry.registry_path()),
+            "registry_readable": not damaged,
+        })
+
     if not entries:
         if damaged:
             return 1              # already explained, and it is not "yet"
@@ -2155,16 +2179,36 @@ def _size(n: int) -> str:
     return f"{n} B"
 
 
-def _books(conn, pattern=None) -> int:
+def _books(conn, pattern=None, as_json: bool = False) -> int:
     """The library, or one book in full."""
     from dyprys.library import books as inspect
 
     found = inspect(conn, pattern)
     if not found:
+        if as_json:
+            return _emit_json({"books": []}) or 1
         where = f" matching {pattern!r}" if pattern else ""
         print(f"no books{where} — run `dyp add`" if not pattern else f"no book matches {pattern!r}",
               file=sys.stderr)
         return 1
+
+    if as_json:
+        return _emit_json({"books": [
+            {
+                "title": b.title,
+                "key": str(b.key),
+                "chunks": b.chunks,
+                "lexical_indexed": b.lexical,
+                "sources": [
+                    {"ordinal": s.ordinal, "path": str(s.path),
+                     "size_bytes": s.size_bytes, "present": s.present}
+                    for s in b.sources],
+                "chunkings": [
+                    {"id": c.id, "target": c.target, "overlap": c.overlap,
+                     "chunks": c.chunks} for c in b.chunkings],
+                "embedded": dict(b.per_model),
+            }
+            for b in found]})
 
     if pattern:
         for book in found:
@@ -2406,8 +2450,30 @@ def _models(conn, directory, args) -> int:
 
     found = inspect(conn, directory)
     if not found:
+        if getattr(args, "json", False):
+            return _emit_json({"models": []}) or 1
         print("no embedding model registered yet — run `dyp embed`", file=sys.stderr)
         return 1
+
+    if getattr(args, "json", False):
+        return _emit_json({"models": [
+            {
+                "name": m.name,
+                "alias": m.alias,
+                "dim": m.dim,
+                "store": m.quantisation,
+                "embedded": m.embedded,
+                "live_chunks": m.live_chunks,
+                "coverage": m.coverage,
+                "disk_bytes": m.bytes_on_disk,
+                "failures": m.failures,
+                "carries": m.carries,
+                "routing": {"profiled_books": m.centroid_books,
+                            "stale_books": m.stale_books},
+                "file_path": m.file_path,
+                "file_present": bool(m.file_path) and Path(m.file_path).exists(),
+            }
+            for m in found]})
 
     if args.needed:
         return _models_needed(conn)
@@ -2713,9 +2779,44 @@ def _eval(conn, directory, args) -> int:
     return 0
 
 
-def _check(conn, deep: bool) -> int:
+def _check(conn, deep: bool, as_json: bool = False) -> int:
     """Report drift and outstanding work. Never fixes anything by itself."""
     report = survey(conn, deep=deep)
+
+    if as_json:
+        from dyprys.routing import is_built, stale_books
+
+        def routing_for(name):
+            row = conn.execute("SELECT id FROM models WHERE name = ?", (name,)).fetchone()
+            if not row or not is_built(conn, row["id"]):
+                return {"built": False, "stale_books": None}
+            return {"built": True, "stale_books": stale_books(conn, row["id"])}
+
+        return _emit_json({
+            "deep": deep,
+            "sources": report.sources,
+            "drift": {
+                "missing": report.drift.missing,
+                "changed": report.drift.changed,
+                "intact": report.drift.intact,
+                "clean": report.drift.clean,
+            },
+            "live_chunks": report.live_chunks,
+            "dead_chunks": report.dead_chunks,
+            "lexical_chunks": report.lexical_chunks,
+            "lexical_complete": report.lexical_chunks == report.live_chunks,
+            "garbled": [
+                {"title": g.title, "chunks": g.chunks, "p90_token": g.p90_token}
+                for g in report.garbled],
+            "models": [
+                {"name": m.name, "dim": m.dim, "embedded": m.embedded,
+                 "to_copy": m.to_copy, "to_embed": m.to_embed, "failed": m.failed,
+                 "outstanding": m.outstanding,
+                 "coverage": (m.embedded / (m.embedded + m.outstanding))
+                 if (m.embedded + m.outstanding) else 0.0,
+                 "routing": routing_for(m.name)}
+                for m in report.models],
+        })
 
     how = "re-hashed" if deep else "checked by size and mtime"
     print(f"{report.sources:,} source files, {how}")
@@ -2803,7 +2904,7 @@ def _check(conn, deep: bool) -> int:
     return 0
 
 
-def _status(conn) -> int:
+def _status(conn, as_json: bool = False) -> int:
     books, sources, chunks, text_bytes = conn.execute(
         "SELECT (SELECT COUNT(*) FROM books), "
         "       (SELECT COUNT(*) FROM sources), "
@@ -2811,49 +2912,65 @@ def _status(conn) -> int:
         "       (SELECT COALESCE(SUM(size_bytes), 0) FROM sources)"
     ).fetchone()
 
-    print(f"books      {books:>12,}")
-    print(f"sources    {sources:>12,}")
-    print(f"text       {_size(text_bytes):>12}")
-    print(f"chunks     {chunks:>12,}")
-
-    chunkings = conn.execute(
+    chunkings_rows = conn.execute(
         "SELECT ch.id, ch.target, ch.overlap, "
         "       COALESCE(SUM(seg.chunk_count), 0) AS n "
         "FROM chunkings ch LEFT JOIN segments seg ON seg.chunking_id = ch.id "
         "GROUP BY ch.id ORDER BY ch.id"
     ).fetchall()
-    if len(chunkings) > 1:
+    model_rows = conn.execute(
+        "SELECT m.id, m.name, m.dim, COALESCE(SUM(p.n_embedded), 0) AS done "
+        "FROM models m LEFT JOIN segment_progress p ON p.model_id = m.id "
+        "GROUP BY m.id ORDER BY m.id"
+    ).fetchall()
+    from dyprys.compact import interrupted
+    carries = conn.execute("SELECT COUNT(*) FROM chunk_carry").fetchone()[0]
+    fails = conn.execute("SELECT COUNT(*) FROM chunk_failures").fetchone()[0]
+
+    if as_json:
+        return _emit_json({
+            "books": books, "sources": sources, "chunks": chunks,
+            "text_bytes": text_bytes,
+            "chunkings": [
+                {"id": c["id"], "target": c["target"], "overlap": c["overlap"],
+                 "chunks": c["n"]} for c in chunkings_rows],
+            "models": [
+                {"name": m["name"], "dim": m["dim"], "embedded": m["done"],
+                 "coverage": (m["done"] / chunks) if chunks else 0.0}
+                for m in model_rows],
+            "pending_carries": carries,
+            "failed_chunks": fails,
+            "compaction_interrupted": interrupted(conn),
+        })
+
+    print(f"books      {books:>12,}")
+    print(f"sources    {sources:>12,}")
+    print(f"text       {_size(text_bytes):>12}")
+    print(f"chunks     {chunks:>12,}")
+
+    if len(chunkings_rows) > 1:
         print(f"\n{'chunking':<20} {'chunks':>12}")
-        for c in chunkings:
+        for c in chunkings_rows:
             label = f"{c['target']}B / {c['overlap']}B overlap"
             print(f"{label:<20} {c['n']:>12,}")
 
     # Embedding progress is per model: a library is routinely complete under one
     # model and untouched under another.
-    models = conn.execute(
-        "SELECT m.id, m.name, m.dim, COALESCE(SUM(p.n_embedded), 0) AS done "
-        "FROM models m LEFT JOIN segment_progress p ON p.model_id = m.id "
-        "GROUP BY m.id ORDER BY m.id"
-    ).fetchall()
-
-    if not models:
+    if not model_rows:
         print("\nno embedding model registered yet")
     else:
         print(f"\n{'model':<34} {'dim':>5} {'embedded':>12}")
-        for m in models:
+        for m in model_rows:
             pct = f"{m['done'] / chunks:.1%}" if chunks else "--"
             print(f"{_shorten(m['name']):<34} {m['dim']:>5} {m['done']:>12,} {pct:>7}")
 
-    from dyprys.compact import interrupted
     if interrupted(conn):
         print("\na compaction stopped part-way through — run `dyp compact` to finish it")
 
-    pending = conn.execute("SELECT COUNT(*) FROM chunk_carry").fetchone()[0]
-    if pending:
-        print(f"\n{pending:,} vectors waiting to be carried over from edited files")
-    failures = conn.execute("SELECT COUNT(*) FROM chunk_failures").fetchone()[0]
-    if failures:
-        print(f"{failures:,} chunks failed to embed (recorded, retryable)")
+    if carries:
+        print(f"\n{carries:,} vectors waiting to be carried over from edited files")
+    if fails:
+        print(f"{fails:,} chunks failed to embed (recorded, retryable)")
 
     # The last thing done to this index, so the journal is discoverable without
     # already knowing it exists — and so "why does this look like that" has an
@@ -2866,6 +2983,18 @@ def _status(conn) -> int:
             print(f"  {_ago(e['at']):>9}  {e['action']:<9} {e['detail']}")
         print("  `dyp history` for more")
     _say_next(conn)
+    return 0
+
+
+def _emit_json(payload) -> int:
+    """Print a payload as JSON and succeed.
+
+    One place so every inspection command's `--json` looks the same. `default=str`
+    turns a Path into its string form rather than raising.
+    """
+    import json as _json
+
+    print(_json.dumps(payload, indent=2, ensure_ascii=False, default=str))
     return 0
 
 

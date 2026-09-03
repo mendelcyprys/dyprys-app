@@ -576,3 +576,60 @@ def test_json_payload_shape_is_stable_and_parseable():
     # an unproved passage carries text=null and its state, not a fabricated quote
     assert second["text"] is None and second["state"] == MISSING
     assert second["cos"] is None and second["chapter"] == 4
+
+
+def _run_capturing(argv, capsys):
+    """Run `dyp argv` and return (exit_code, parsed_json_stdout)."""
+    import json
+
+    from dyprys.cli import main
+
+    capsys.readouterr()          # drain any output left by a previous command
+    code = main(argv)
+    out = capsys.readouterr().out
+    return code, json.loads(out)
+
+
+def test_inspection_commands_emit_valid_json(tmp_path, capsys):
+    """status/check/books all --json on an ingested (unembedded) index parse and
+    carry the fields an agent drives on. No model needed — this is the shape."""
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 9 for n in range(20)),
+                    encoding="utf-8")
+    data = str(tmp_path / "ix")
+    assert main(["--data", data, "add", str(book)]) == 0
+
+    code, status = _run_capturing(["--data", data, "status", "--json"], capsys)
+    assert code == 0
+    assert status["books"] == 1 and status["chunks"] > 0
+    assert status["models"] == [] and status["compaction_interrupted"] is False
+
+    code, check = _run_capturing(["--data", data, "check", "--json"], capsys)
+    assert code == 0
+    assert check["drift"]["clean"] is True
+    assert check["live_chunks"] == status["chunks"]
+    assert "lexical_complete" in check and check["models"] == []
+
+    code, books = _run_capturing(["--data", data, "books", "--json"], capsys)
+    assert code == 0
+    assert len(books["books"]) == 1
+    b = books["books"][0]
+    assert b["title"] == "b" and b["chunks"] == status["chunks"]
+    assert isinstance(b["sources"], list) and b["sources"][0]["present"] is True
+
+
+def test_models_json_with_no_model_is_empty_and_missing(tmp_path, capsys):
+    """An index with no embedding model: valid JSON, empty list, exit 1 (a miss),
+    the same as the human path returning non-zero."""
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("Para about neurons. " * 200, encoding="utf-8")
+    data = str(tmp_path / "ix")
+    main(["--data", data, "add", str(book)])
+
+    code, models = _run_capturing(["--data", data, "models", "--json"], capsys)
+    assert code == 1
+    assert models == {"models": []}

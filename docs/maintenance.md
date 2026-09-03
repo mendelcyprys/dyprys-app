@@ -3,6 +3,11 @@
 The read-only inspection commands, and the lifecycle commands that change an
 index. Most days nothing here is needed.
 
+`status`, `check`, `books` and `models` all take `--json` — parse that instead of
+the human tables when driving the tool programmatically. Each prints one JSON
+object on stdout (exit 0, or 1 for an empty listing), safe to pipe through `jq` if
+it is on the machine.
+
 ## `dyp check` — what has drifted
 
 Compares the index against the filesystem and against every model. **Reports,
