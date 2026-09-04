@@ -220,3 +220,37 @@ def test_the_journal_survives_a_backup_and_restore(tmp_path):
         assert row["action"] == "compact" and "54,875" in row["detail"]
     finally:
         back.close()
+
+
+def test_a_cyprys_index_opens_in_place(tmp_path):
+    """dyprys is a byte-identical fork of cyprys; the only thing that differed was
+    the database filename. A cyprys index must open in place, not be re-embedded."""
+    from dyprys import db
+
+    # build a real index, then give its database the legacy (cyprys) name
+    conn = db.connect(tmp_path)
+    from dyprys.ingest import ingest_paths
+    book = tmp_path / "b.txt"
+    book.write_text("Paragraph about neurons. " * 300, encoding="utf-8")
+    ingest_paths(conn, [book])
+    n = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    conn.close()
+
+    legacy_dir = tmp_path / "legacy"
+    legacy_dir.mkdir()
+    (tmp_path / db.DB_FILENAME).rename(legacy_dir / "cyprys.sqlite")
+
+    assert db.index_exists(legacy_dir)
+    assert db.db_path(legacy_dir).name == "cyprys.sqlite"
+    reopened = db.connect(legacy_dir)
+    assert reopened.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == n
+    reopened.close()
+
+
+def test_a_new_index_is_always_created_under_our_own_name(tmp_path):
+    from dyprys import db
+
+    assert not db.index_exists(tmp_path)
+    db.connect(tmp_path).close()
+    assert (tmp_path / db.DB_FILENAME).exists()          # dyprys.sqlite, not the legacy name
+    assert db.db_path(tmp_path).name == db.DB_FILENAME

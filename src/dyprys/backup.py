@@ -160,7 +160,7 @@ def restore(
     manifest = read_manifest(archive)
     if manifest.get("format") != FORMAT:
         raise ValueError(f"backup format {manifest.get('format')}, this build reads {FORMAT}")
-    if (data_dir / db.DB_FILENAME).exists():
+    if db.index_exists(data_dir):
         raise ValueError(f"{data_dir} already holds an index; restore into an empty directory")
 
     data_dir.mkdir(parents=True, exist_ok=True)

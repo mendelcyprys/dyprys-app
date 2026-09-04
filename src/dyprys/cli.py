@@ -362,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     # that is not there means a wrong path, a stale library entry, or a drive
     # that is not mounted -- and creating an empty index at that spot hides all
     # three behind "nothing embedded yet".
-    if args.command not in ("add", "restore") and not (where / db.DB_FILENAME).exists():
+    if args.command not in ("add", "restore") and not db.index_exists(where):
         named = f" (library {args.library!r})" if getattr(args, "library", None) else ""
         print(f"no index at {where}{named}", file=sys.stderr)
         print("`dyp add` creates one; `dyp library list` shows what is registered.",

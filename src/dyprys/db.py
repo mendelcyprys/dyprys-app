@@ -32,6 +32,31 @@ SCHEMA_VERSION = 14
 DEFAULT_DATA_DIR = Path("data")
 DB_FILENAME = "dyprys.sqlite"
 
+# dyprys is a fork of cyprys with a byte-identical schema and vector format — the
+# only thing that ever differed was this filename. So a cyprys index is opened in
+# place, not converted: the vectors, offsets and routing profiles are already
+# ours. A new index is always created under DB_FILENAME.
+LEGACY_DB_FILENAMES = ("cyprys.sqlite",)
+
+
+def db_path(directory: Path) -> Path:
+    """The database file to open in `directory`: ours if present, else a
+    fork-compatible one, else ours (the path a new index will be created at)."""
+    directory = Path(directory)
+    primary = directory / DB_FILENAME
+    if primary.exists():
+        return primary
+    for legacy in LEGACY_DB_FILENAMES:
+        candidate = directory / legacy
+        if candidate.exists():
+            return candidate
+    return primary
+
+
+def index_exists(directory: Path) -> bool:
+    """Whether `directory` already holds an index this build can open."""
+    return db_path(directory).exists()
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
@@ -285,7 +310,7 @@ def vectors_path(directory: Path, model_id: int) -> Path:
 def connect(directory: Path) -> sqlite3.Connection:
     """Open (creating if needed) the database under `directory`."""
     directory.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(directory / DB_FILENAME)
+    conn = sqlite3.connect(db_path(directory))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")   # embed writes while a query reads
     conn.execute("PRAGMA synchronous = NORMAL")
