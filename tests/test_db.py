@@ -222,35 +222,66 @@ def test_the_journal_survives_a_backup_and_restore(tmp_path):
         back.close()
 
 
-def test_a_cyprys_index_opens_in_place(tmp_path):
-    """dyprys is a byte-identical fork of cyprys; the only thing that differed was
-    the database filename. A cyprys index must open in place, not be re-embedded."""
-    from dyprys import db
-
-    # build a real index, then give its database the legacy (cyprys) name
-    conn = db.connect(tmp_path)
-    from dyprys.ingest import ingest_paths
-    book = tmp_path / "b.txt"
+def _build_index(directory):
+    """A real index in `directory`; returns its chunk count."""
+    directory.mkdir(parents=True, exist_ok=True)
+    book = directory / "b.txt"
     book.write_text("Paragraph about neurons. " * 300, encoding="utf-8")
-    ingest_paths(conn, [book])
-    n = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    conn.close()
+    c = db.connect(directory)
+    ingest_paths(c, [book])
+    n = c.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    c.close()
+    return n
 
-    legacy_dir = tmp_path / "legacy"
-    legacy_dir.mkdir()
-    (tmp_path / db.DB_FILENAME).rename(legacy_dir / "cyprys.sqlite")
 
-    assert db.index_exists(legacy_dir)
-    assert db.db_path(legacy_dir).name == "cyprys.sqlite"
-    reopened = db.connect(legacy_dir)
+def test_an_index_is_found_by_its_tables_whatever_it_is_named(tmp_path):
+    """The database is recognised by content, not filename — so a renamed index,
+    or one a fork or sibling tool wrote, opens in place with no reference to any
+    other project's name."""
+    src = tmp_path / "built"
+    n = _build_index(src)
+    moved = tmp_path / "elsewhere"
+    moved.mkdir()
+    (src / db.DB_FILENAME).rename(moved / "some-old-backup.sqlite")   # arbitrary name
+
+    assert db.index_exists(moved)
+    assert db.db_path(moved).name == "some-old-backup.sqlite"
+    reopened = db.connect(moved)
     assert reopened.execute("SELECT COUNT(*) FROM chunks").fetchone()[0] == n
     reopened.close()
 
 
-def test_a_new_index_is_always_created_under_our_own_name(tmp_path):
-    from dyprys import db
+def test_a_stray_non_index_sqlite_is_not_mistaken_for_one(tmp_path):
+    """The guess is checked: a random .sqlite lacking our tables is ignored, so it
+    is never opened as though it were an index."""
+    import sqlite3
+
+    junk = sqlite3.connect(tmp_path / "notes.sqlite")
+    junk.execute("CREATE TABLE todo (id INTEGER, task TEXT)")
+    junk.commit(); junk.close()
 
     assert not db.index_exists(tmp_path)
+    assert db.db_path(tmp_path).name == db.DB_FILENAME   # would create ours, not adopt the junk
+
+
+def test_a_present_dyprys_db_wins_without_a_search(tmp_path):
+    _build_index(tmp_path)
+    assert db.db_path(tmp_path).name == db.DB_FILENAME
+
+
+def test_two_indexes_in_one_directory_is_refused_clearly(tmp_path):
+    """Ambiguity is an error, not a silent pick of the wrong one."""
+    a = tmp_path / "a"; _build_index(a)
+    b = tmp_path / "b"; _build_index(b)
+    (a / db.DB_FILENAME).rename(tmp_path / "one.sqlite")
+    (b / db.DB_FILENAME).rename(tmp_path / "two.sqlite")
+
+    with pytest.raises(ValueError, match="more than one index"):
+        db.db_path(tmp_path)
+
+
+def test_a_new_index_is_created_under_our_own_name(tmp_path):
+    assert not db.index_exists(tmp_path)
     db.connect(tmp_path).close()
-    assert (tmp_path / db.DB_FILENAME).exists()          # dyprys.sqlite, not the legacy name
+    assert (tmp_path / db.DB_FILENAME).exists()
     assert db.db_path(tmp_path).name == db.DB_FILENAME

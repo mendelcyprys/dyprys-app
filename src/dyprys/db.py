@@ -32,30 +32,70 @@ SCHEMA_VERSION = 14
 DEFAULT_DATA_DIR = Path("data")
 DB_FILENAME = "dyprys.sqlite"
 
-# dyprys is a fork of cyprys with a byte-identical schema and vector format — the
-# only thing that ever differed was this filename. So a cyprys index is opened in
-# place, not converted: the vectors, offsets and routing profiles are already
-# ours. A new index is always created under DB_FILENAME.
-LEGACY_DB_FILENAMES = ("cyprys.sqlite",)
+# An index is recognised by what is in it, not by what the file is called. The
+# schema and vector format are stable across renames and across a fork (dyprys
+# began as one), so rather than hardcode another tool's filename we find any
+# .sqlite in the directory that carries these tables. The fast path never probes:
+# a present DB_FILENAME wins outright, so this costs nothing in normal use.
+_SIGNATURE_TABLES = frozenset({"books", "chunks", "segments", "models", "chunkings"})
+
+
+def _is_index(path: Path) -> bool:
+    """Does `path` look like one of our index databases, by its tables?
+
+    A plain connection, not a read-only URI: the URI form breaks on a space in
+    the name and cannot open a WAL-mode database whose sidecar files are absent,
+    both of which a real index can have. `query_only` keeps the probe from
+    writing to a file it may end up rejecting.
+    """
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            conn.execute("PRAGMA query_only = ON")
+            names = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+    return _SIGNATURE_TABLES <= names
+
+
+def _index_candidates(directory: Path) -> list[Path]:
+    """Existing .sqlite files in `directory` that are one of our indexes."""
+    return sorted(p for p in Path(directory).glob("*.sqlite") if _is_index(p))
 
 
 def db_path(directory: Path) -> Path:
-    """The database file to open in `directory`: ours if present, else a
-    fork-compatible one, else ours (the path a new index will be created at)."""
+    """The database file to open in `directory`.
+
+    A present `dyprys.sqlite` wins immediately. Otherwise the directory is
+    searched for a `.sqlite` that is actually one of our indexes -- verified by
+    its tables, not its name -- so a renamed database, or one written by a
+    sibling tool, is found without guessing blindly. With none present, the path
+    a new index will be created at is returned.
+    """
     directory = Path(directory)
     primary = directory / DB_FILENAME
     if primary.exists():
         return primary
-    for legacy in LEGACY_DB_FILENAMES:
-        candidate = directory / legacy
-        if candidate.exists():
-            return candidate
+    found = _index_candidates(directory)
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        names = ", ".join(p.name for p in found)
+        raise ValueError(
+            f"{directory} holds more than one index database ({names}); "
+            f"rename the one to keep to {DB_FILENAME}")
     return primary
 
 
 def index_exists(directory: Path) -> bool:
     """Whether `directory` already holds an index this build can open."""
-    return db_path(directory).exists()
+    directory = Path(directory)
+    if (directory / DB_FILENAME).exists():
+        return True
+    return bool(_index_candidates(directory))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
