@@ -17,11 +17,12 @@ one only when a task needs it.
 
 Run **`dyp status`**. If it names a notes file, **read it before searching.** A
 corpus carries facts the index cannot tell you and you will not guess: which
-shelf `-c` cuts along, which terms its translation renders into English and
-which it keeps in the original, which two subjects share a vocabulary closely
-enough that a query for one returns the other. Nobody discovers these from the
-results — they only notice, several bad searches later, that they should have.
-`dyp library list` names them too, per library.
+shelf `-c` cuts along cleanly and which it does not, the words this collection
+uses for the thing you are about to call something else, two subjects whose
+vocabulary overlaps enough that a query for one returns the other, a title that
+means two different books. Nobody discovers these from the results — they only
+notice, several bad searches later, that they should have. `dyp library list`
+names them too, per library.
 
 There may not be one. Its absence is not a problem; skipping it when it exists
 is, and if a session teaches you such a fact, offer to add it.
@@ -50,7 +51,7 @@ its rank is a hint, not a verdict.
 | asks in everyday words about a technical library | add `--expand MODEL` | rewrites the query into the library's vocabulary; ~4 s |
 | wants a written answer, not passages | add `--summarise MODEL` | drafts prose; every quote is checked against the source |
 | means one shelf / author / book | add `-c PATTERN` | matches title or path, case-insensitive |
-| wants the right passage **ranked first** | add `--rerank` | a cross-encoder reorders what was found; costs seconds, never reorders for the worse |
+| wants the right passage **ranked first** | add `--rerank` | a cross-encoder rescores what was already found; buys rank, not recall |
 
 Defaults are deliberately fast and literal-safe. Reach for `--expand` and
 `--summarise` only when the request is worth the seconds they cost; they are off
@@ -77,11 +78,11 @@ than the one-in-twenty-five above, which assumes a current profile. Re-run
 waiting, and search warns when it is routing around some.
 
 **Reach for `--rerank` whenever the rank matters and you can spare the seconds.**
-It reorders results already found, so it cannot lose an answer the search missed —
-but across a 24-run comparison on a mixed corpus it never once ranked an answer
-*worse*, and it doubled how often the right passage came first (2/6 → 4/6),
-including 3→1 and 4→1 on questions where the answer sat below two wrong ones.
-`cos` is a poor guide to which of five results is right; this is the cheap fix.
+It rescores results already found, so it cannot recover an answer the search
+missed — it buys rank, not recall, and rank is usually the complaint. Since
+`cos` is a poor guide to which of five results is right, this is the cheapest
+correction available. How much it gains varies by corpus; `docs/searching.md`
+carries the measurements and says what each was measured on.
 
 **Do not stack `--expand` and `--rerank`.** Measured, they are substitutes, not
 complements: together they recover the same answers as the better one alone, at
@@ -105,10 +106,10 @@ several times faster.
   means it shares vocabulary; `vec` means it matched on meaning.
 - **the last line** — the file and byte offset. This is what you hand the user so
   they can open the source themselves. It is also the only thing that says
-  *which* book: titles are not unique, and a library can hold three books called
-  `Eruvin` on three different shelves. **Attribute from the path, never from the
-  title alone** — `dyp add` warns when titles collide, and `dyp books PATTERN`
-  shows what shares one.
+  *which* book: titles are not unique, and one library can hold several distinct
+  books under the same title on different shelves. **Attribute from the path,
+  never from the title alone** — `dyp add` warns when titles collide, and
+  `dyp books PATTERN` shows what shares one.
 
 When you need the data rather than the display, use `--json` (see below).
 
