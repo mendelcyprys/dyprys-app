@@ -95,6 +95,14 @@ faster.
 
 - `provenance` is the native rank signal, not a fused score (a fused RRF score
   spans only 0.016–0.033 and is uninterpretable — never surface one).
+- `offset` is the **chunk's** own start. The printed output shows a different
+  byte for the same result, and both are real: a chunk boundary is a byte
+  budget, so a passage usually begins mid-sentence, and the display widens it
+  to the enclosing sentences and cites where the text it actually shows you
+  begins. The two therefore differ by up to a sentence — typically a hundred
+  bytes or so, always inside the same passage. Cite whichever matches the text
+  you are quoting, and do not treat the pair as two different locations when
+  reconciling a printed result against a parsed one.
 - `text` is `null` when the passage could not be proved against its stored hash;
   `state` says which: `exact`, `shifted` (found intact at a moved offset),
   `changed` (file edited, bytes gone), `missing` (file gone/unmounted). **Never
