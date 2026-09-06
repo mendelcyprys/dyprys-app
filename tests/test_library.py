@@ -158,6 +158,33 @@ def test_an_unbound_model_falls_back_to_the_whole_book(conn, stocked):
     assert book.live_for("stub-model@abc") == book.chunks
 
 
+def test_a_library_without_notes_reports_none(conn, tmp_path):
+    """Absence is the normal case and must not be an error."""
+    from dyprys.library import notes_path
+
+    assert notes_path(tmp_path) is None
+
+
+def test_notes_are_found_and_NOTES_wins_over_README(conn, tmp_path):
+    """A corpus may already have a README for people; NOTES.md is for searchers."""
+    from dyprys.library import notes_path
+
+    (tmp_path / "README.md").write_text("what this collection is", encoding="utf-8")
+    assert notes_path(tmp_path).name == "README.md"
+
+    (tmp_path / "NOTES.md").write_text("-c cuts along the shelf, not the topic",
+                                       encoding="utf-8")
+    assert notes_path(tmp_path).name == "NOTES.md"
+
+
+def test_a_directory_named_like_a_notes_file_is_not_one(conn, tmp_path):
+    """`is_file`, not `exists` — a directory called NOTES.md cannot be read."""
+    from dyprys.library import notes_path
+
+    (tmp_path / "NOTES.md").mkdir()
+    assert notes_path(tmp_path) is None
+
+
 def test_a_missing_source_file_is_flagged(conn, stocked, library):
     (library / "book0.txt").unlink()
 

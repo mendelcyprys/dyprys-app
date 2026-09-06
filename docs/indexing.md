@@ -98,6 +98,16 @@ small and the first result matters most. Several models coexist in one index,
 each with its own vectors, coverage and routing profile — choose per query with
 `--model NAME`.
 
+**Those figures are one corpus, and the shape of the trade can invert.** They
+come from a 117-book English non-fiction library. On a translated religious-law
+corpus the same pair came out the other way round in a small (6-question) check:
+jina ranked first more often when it found the answer at all, but *missed* two
+outright — one at rank 13, one absent from 40 results — where the larger model
+found all six. Recall and precision traded places. So treat the numbers above as
+evidence that the two differ, not as a prediction for your library; if the
+choice matters, measure it on your own questions. Whichever you pick,
+`--rerank` improved both.
+
 ### Smaller storage
 
 - `--int8` (or `dyp models --quantise NAME` after the fact) — ¼ disk, no measured

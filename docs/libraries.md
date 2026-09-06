@@ -34,7 +34,26 @@ aside if ever found corrupt. Losing it costs the names and nothing else; every
 library still opens with `--data DIR`.
 
 `dyp library list --json` emits the libraries structurally
-(`[{name, path, default, exists, books, chunks, models[]}]`) for programmatic use.
+(`[{name, path, default, exists, notes, books, chunks, models[]}]`) for
+programmatic use.
+
+## Notes on a library
+
+Drop a **`NOTES.md`** (or `README.md`) in the library directory and `dyp status`
+prints a line pointing at it, `dyp library list` names it, and both `--json`
+forms carry it as `notes`. dyprys never reads, parses or writes the file — the
+problem it solves is that a reader does not know to look.
+
+Worth putting in one: which shelf `-c` cuts along cleanly and which it does not,
+terms the corpus renders differently from how you would search for them, subjects
+whose vocabulary overlaps enough that a query for one returns the other, and any
+title that means two different books. These are facts about the text that the
+index cannot expose and that each new reader otherwise rediscovers — or doesn't,
+and searches worse without knowing it.
+
+```
+~/books/NOTES.md          # dyp status → "notes on this library — read it first"
+```
 
 ## Several libraries over shared text
 

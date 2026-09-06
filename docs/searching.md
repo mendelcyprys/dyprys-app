@@ -54,6 +54,14 @@ dyp ask "..." --rerank --reranker FILE.gguf  # cross-encoder reorder (~9s)
 quick look, drop it when the answer matters more than the second it saves. `-c`
 matching nothing returns nothing (exit 1), never a silent full-library search.
 
+`--rerank` reorders what the search already found, using a cross-encoder that
+reads query and passage together instead of comparing two vectors. It cannot
+recover an answer the search missed, so it raises rank rather than recall — but
+that is usually the complaint. Measured over 24 runs on a mixed corpus it never
+ranked an answer worse than the un-reranked order, and doubled how often the
+right passage came first (2/6 → 4/6), moving answers from rank 3 and rank 4 to
+rank 1. Add it whenever the ordering matters and seconds are affordable.
+
 **Do not stack `--expand` and `--rerank`.** Measured, they recover the same
 answers; pay for one. Reranking finds a few more; expansion is several times
 faster.

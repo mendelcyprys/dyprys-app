@@ -113,6 +113,31 @@ def drop_model(conn: sqlite3.Connection, directory: Path, model_id: int) -> list
     return removed
 
 
+# Where a library's owner may leave what is worth knowing about it. First match
+# wins; NOTES.md is checked first so a library that already has a README for
+# people can keep one specifically for whoever searches it.
+NOTE_FILES = ("NOTES.md", "README.md")
+
+
+def notes_path(directory) -> Path | None:
+    """A file of what is worth knowing about *this* corpus, if one was left.
+
+    dyprys neither owns nor parses it, and there is no command to write it.
+    The gap it closes is discovery, not storage. A corpus carries facts no
+    tool can infer from it -- which shelf `-c` cuts along, which terms the
+    translation renders and which it keeps, which two subjects share a
+    vocabulary and so need scoping apart -- and with nowhere to leave them,
+    every reader works them out again or, more often, does not and searches
+    worse for it. So: if the owner left a file, say so where a reader is
+    already looking.
+    """
+    for name in NOTE_FILES:
+        candidate = Path(directory) / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 @dataclass
 class SourceInfo:
     ordinal: int
