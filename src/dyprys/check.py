@@ -86,6 +86,15 @@ class Garbled:
 
 
 @dataclass
+class Empty:
+    """A book the index holds but that yielded no text to search."""
+
+    title: str
+    key: str
+    bytes_on_disk: int
+
+
+@dataclass
 class Survey:
     books: int
     sources: int
@@ -95,6 +104,7 @@ class Survey:
     drift: Drift
     models: list[ModelWork]
     garbled: list[Garbled] = field(default_factory=list)
+    empty: list[Empty] = field(default_factory=list)
 
 
 def survey(conn: sqlite3.Connection, deep: bool = False) -> Survey:
@@ -118,7 +128,32 @@ def survey(conn: sqlite3.Connection, deep: bool = False) -> Survey:
         drift=_drift(conn, deep),
         models=_model_work(conn, live),
         garbled=garbled_books(conn),
+        empty=empty_books(conn),
     )
+
+
+def empty_books(conn: sqlite3.Connection, only: set[int] | None = None) -> list[Empty]:
+    """Books with a source on disk but not one chunk to search.
+
+    Extraction can fail by producing nothing at all -- a 29-byte file where a
+    pitchbook should be -- and the result is a book that is listed, counted and
+    reported as intact while no query can ever return it. Nothing else notices:
+    `garbled_books` samples a book's chunks and a book without chunks has none
+    to sample, drift compares bytes on disk against what was ingested and both
+    agree, and coverage is a share of zero, which is complete.
+
+    Unlike garbling this needs no threshold and no sample. A book with no
+    chunks is unsearchable as a matter of fact, not of degree.
+    """
+    rows = conn.execute(
+        "SELECT b.id, b.title, b.key, COALESCE(SUM(src.size_bytes), 0) AS bytes "
+        "FROM books b JOIN sources src ON src.book_id = b.id "
+        "LEFT JOIN segments seg ON seg.source_id = src.id "
+        "GROUP BY b.id HAVING COALESCE(SUM(seg.chunk_count), 0) = 0 "
+        "ORDER BY b.title"
+    ).fetchall()
+    return [Empty(r["title"], r["key"], r["bytes"]) for r in rows
+            if only is None or r["id"] in only]
 
 
 def garbled_books(
