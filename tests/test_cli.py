@@ -785,6 +785,57 @@ def test_watch_still_gives_up_when_nothing_is_running(tmp_path):
     assert time.monotonic() - began < 3, "waited far longer than the grace given"
 
 
+def test_status_points_at_a_notes_file_when_the_owner_left_one(tmp_path, capsys):
+    """What a corpus needs said about it has to be discoverable somewhere.
+
+    A library carries facts the index cannot expose — which shelf `-c` cuts
+    along, which terms its translation keeps — and a reader who is not told
+    they exist rediscovers them, or searches worse without knowing why.
+    """
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 9 for n in range(12)),
+                    encoding="utf-8")
+    data = tmp_path / "ix"
+    assert main(["--data", str(data), "add", str(book)]) == 0
+    capsys.readouterr()
+
+    # Nothing to say when there is no file, and nothing broken by its absence.
+    code, status = _run_capturing(["--data", str(data), "status", "--json"], capsys)
+    assert code == 0 and status["notes"] is None
+
+    (data / "NOTES.md").write_text("-c cuts by shelf here, not by topic",
+                                   encoding="utf-8")
+
+    code, status = _run_capturing(["--data", str(data), "status", "--json"], capsys)
+    assert status["notes"] == str(data / "NOTES.md")
+
+    assert main(["--data", str(data), "status"]) == 0
+    out = capsys.readouterr().out
+    assert "NOTES.md" in out
+    assert "read it first" in out, "a path with no instruction is easy to skim past"
+
+
+def test_rerank_given_the_model_file_says_which_flag_wanted_it(tmp_path):
+    """`--rerank` takes a count and `--reranker` the GGUF; they differ by two
+    letters. argparse's own reply repeats the path and names neither flag."""
+    import argparse as _argparse
+
+    from dyprys.cli import _rerank_depth
+
+    assert _rerank_depth("25") == 25
+
+    with pytest.raises(_argparse.ArgumentTypeError) as caught:
+        _rerank_depth("/models/qwen3-reranker-0.6b.gguf")
+    assert "--reranker" in str(caught.value), "must name the flag that wanted it"
+
+    # A plain typo is not a path, so it should not be told to use --reranker.
+    with pytest.raises(_argparse.ArgumentTypeError) as plain:
+        _rerank_depth("ten")
+    assert "--reranker" not in str(plain.value)
+
+
 def test_models_json_with_no_model_is_empty_and_missing(tmp_path, capsys):
     """An index with no embedding model: valid JSON, empty list, exit 1 (a miss),
     the same as the human path returning non-zero."""

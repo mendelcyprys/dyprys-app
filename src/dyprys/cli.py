@@ -174,7 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
              "comparison, not noise",
     )
     ask.add_argument(
-        "--rerank", type=int, metavar="N", nargs="?", const=10, default=None,
+        "--rerank", type=_rerank_depth, metavar="N", nargs="?", const=10, default=None,
         help="rescore the top N candidates with a cross-encoder (default 10)",
     )
     ask.add_argument("--reranker", metavar="GGUF", help="reranker model (default: $DYPRYS_RERANKER)")
@@ -222,7 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
              "comparison, not noise",
     )
     ev.add_argument(
-        "--rerank", type=int, metavar="N", nargs="?", const=10, default=None,
+        "--rerank", type=_rerank_depth, metavar="N", nargs="?", const=10, default=None,
         help="rescore the top N candidates with a cross-encoder (default 10)",
     )
     ev.add_argument("--reranker", metavar="GGUF", help="reranker model (default: $DYPRYS_RERANKER)")
@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "watch":
             return _watch(conn, _where(args), args.every, args.wait)
         if args.command == "status":
-            return _status(conn, args.json)
+            return _status(conn, args.json, _where(args))
         if args.command == "check":
             return _check(conn, args.deep, args.json)
         if args.command == "embed":
@@ -867,6 +867,7 @@ def _sources_under(index_dir: Path) -> str | None:
 def _library(args, parser) -> int:
     """Name the libraries this installation knows about."""
     from dyprys import registry
+    from dyprys.library import notes_path
 
     action = getattr(args, "action", None)
     # An unreadable registry looks exactly like an empty one, and saying "no
@@ -931,8 +932,9 @@ def _library(args, parser) -> int:
     if getattr(args, "json", False):
         libs = []
         for e in entries:
+            note = notes_path(e.path) if e.exists else None
             row = {"name": e.name, "path": str(e.path), "default": e.is_default,
-                   "exists": e.exists}
+                   "exists": e.exists, "notes": str(note) if note else None}
             held = registry.summarise(e.path) if e.exists else None
             if held is not None:
                 row.update(books=held.books, chunks=held.chunks, models=[
@@ -977,6 +979,10 @@ def _library(args, parser) -> int:
             print(f"{head}  {counts} {done:>10,} {share:>6.0%}  {_shorten(name)}")
     print(f"\n* is the default. {registry.registry_path()}")
     print("paths: " + ", ".join(f"{e.name}={e.path}" for e in entries))
+    annotated = [(e.name, notes_path(e.path)) for e in entries if e.exists]
+    annotated = [(n, p) for n, p in annotated if p]
+    if annotated:
+        print("notes: " + ", ".join(f"{n}={p}" for n, p in annotated))
     return 0
 
 
@@ -3030,7 +3036,7 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
     return 0
 
 
-def _status(conn, as_json: bool = False) -> int:
+def _status(conn, as_json: bool = False, directory=None) -> int:
     books, sources, chunks, text_bytes = conn.execute(
         "SELECT (SELECT COUNT(*) FROM books), "
         "       (SELECT COUNT(*) FROM sources), "
@@ -3059,8 +3065,10 @@ def _status(conn, as_json: bool = False) -> int:
         for m in model_rows
     }
     from dyprys.compact import interrupted
+    from dyprys.library import notes_path
     carries = conn.execute("SELECT COUNT(*) FROM chunk_carry").fetchone()[0]
     fails = conn.execute("SELECT COUNT(*) FROM chunk_failures").fetchone()[0]
+    notes = notes_path(directory) if directory else None
 
     if as_json:
         return _emit_json({
@@ -3078,12 +3086,20 @@ def _status(conn, as_json: bool = False) -> int:
             "pending_carries": carries,
             "failed_chunks": fails,
             "compaction_interrupted": interrupted(conn),
+            # Null unless the owner left one. Read it before searching: it holds
+            # what the index cannot tell you about the corpus in it.
+            "notes": str(notes) if notes else None,
         })
 
     print(f"books      {books:>12,}")
     print(f"sources    {sources:>12,}")
     print(f"text       {_size(text_bytes):>12}")
     print(f"chunks     {chunks:>12,}")
+
+    # High, and before the numbers mean anything: what a corpus needs said about
+    # it is worth knowing *before* the first search, not after several bad ones.
+    if notes is not None:
+        print(f"\nnotes on this library — read it first\n  {notes}")
 
     if len(chunkings_rows) > 1:
         print(f"\n{'chunking':<20} {'chunks':>12}")
@@ -3144,6 +3160,25 @@ def _emit_json(payload) -> int:
 
     print(_json.dumps(payload, indent=2, ensure_ascii=False, default=str))
     return 0
+
+
+def _rerank_depth(value: str) -> int:
+    """How many candidates to rescore — a count, not the model file.
+
+    `--rerank` and `--reranker` differ by two letters and take different kinds
+    of thing, so the GGUF lands on the wrong one easily. argparse's own reply
+    is "invalid int value: '/…/qwen3-reranker.gguf'", which repeats the value
+    and never mentions the flag that wanted it.
+    """
+    try:
+        return int(value)
+    except ValueError:
+        hint = ""
+        if value.endswith(".gguf") or os.sep in value:
+            hint = " — the model file goes to --reranker, this takes a count"
+        raise argparse.ArgumentTypeError(
+            f"expected a number of candidates to rescore, got {value!r}{hint}"
+        ) from None
 
 
 def _shorten(name: str, width: int = 34) -> str:

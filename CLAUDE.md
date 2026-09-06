@@ -13,6 +13,22 @@ one only when a task needs it.
 
 ---
 
+## Before the first search of an unfamiliar library
+
+Run **`dyp status`**. If it names a notes file, **read it before searching.** A
+corpus carries facts the index cannot tell you and you will not guess: which
+shelf `-c` cuts along cleanly and which it does not, the words this collection
+uses for the thing you are about to call something else, two subjects whose
+vocabulary overlaps enough that a query for one returns the other, a title that
+means two different books. Nobody discovers these from the results — they only
+notice, several bad searches later, that they should have. `dyp library list`
+names them too, per library.
+
+There may not be one. Its absence is not a problem; skipping it when it exists
+is, and if a session teaches you such a fact, offer to add it.
+
+---
+
 ## The one habit that matters most
 
 **Read the top five, not the top one, and quote from them.** The answer is the
@@ -35,6 +51,7 @@ its rank is a hint, not a verdict.
 | asks in everyday words about a technical library | add `--expand MODEL` | rewrites the query into the library's vocabulary; ~4 s |
 | wants a written answer, not passages | add `--summarise MODEL` | drafts prose; every quote is checked against the source |
 | means one shelf / author / book | add `-c PATTERN` | matches title or path, case-insensitive |
+| wants the right passage **ranked first** | add `--rerank` | a cross-encoder rescores what was already found; buys rank, not recall |
 
 Defaults are deliberately fast and literal-safe. Reach for `--expand` and
 `--summarise` only when the request is worth the seconds they cost; they are off
@@ -60,6 +77,13 @@ than the one-in-twenty-five above, which assumes a current profile. Re-run
 `dyp route` after every `add` + `embed`; `dyp check` says how many books are
 waiting, and search warns when it is routing around some.
 
+**Reach for `--rerank` whenever the rank matters and you can spare the seconds.**
+It rescores results already found, so it cannot recover an answer the search
+missed — it buys rank, not recall, and rank is usually the complaint. Since
+`cos` is a poor guide to which of five results is right, this is the cheapest
+correction available. How much it gains varies by corpus; `docs/searching.md`
+carries the measurements and says what each was measured on.
+
 **Do not stack `--expand` and `--rerank`.** Measured, they are substitutes, not
 complements: together they recover the same answers as the better one alone, at
 the sum of the costs. Pick one — reranking finds a few more answers, expansion is
@@ -81,7 +105,11 @@ several times faster.
   means the passage holds the query's words in order (a literal hit); `words`
   means it shares vocabulary; `vec` means it matched on meaning.
 - **the last line** — the file and byte offset. This is what you hand the user so
-  they can open the source themselves.
+  they can open the source themselves. It is also the only thing that says
+  *which* book: titles are not unique, and one library can hold several distinct
+  books under the same title on different shelves. **Attribute from the path,
+  never from the title alone** — `dyp add` warns when titles collide, and
+  `dyp books PATTERN` shows what shares one.
 
 When you need the data rather than the display, use `--json` (see below).
 
