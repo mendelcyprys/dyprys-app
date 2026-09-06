@@ -39,7 +39,13 @@ class Library:
 
     @property
     def exists(self) -> bool:
-        return (self.path / "dyprys.sqlite").exists()
+        # By content, not by filename: an index is one of ours because of the
+        # tables in it. Asking for `dyprys.sqlite` by name reported a renamed
+        # or forked index as absent, so `dyp library list` printed "no index
+        # yet" beside a library every other command opened and read.
+        from dyprys import db
+
+        return db.index_exists(self.path)
 
 
 # Where an unreadable registry is kept when a write would otherwise erase it.
@@ -202,7 +208,16 @@ def summarise(path: Path) -> Contents | None:
     """
     import sqlite3 as _sqlite3
 
-    database = Path(path) / "dyprys.sqlite"
+    from dyprys import db
+
+    # Resolved the same way every other command resolves it -- by the tables in
+    # the file rather than its name -- so a listing agrees with what opening it
+    # would find. db_path raises when a directory holds two indexes; a listing
+    # says nothing about that one rather than failing the whole listing.
+    try:
+        database = db.db_path(Path(path))
+    except ValueError:
+        return None
     if not database.exists():
         return None
     try:

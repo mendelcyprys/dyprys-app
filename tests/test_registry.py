@@ -291,6 +291,35 @@ def test_summarise_survives_a_directory_with_no_index(isolated, tmp_path):
     assert registry.summarise(empty) is None
 
 
+def test_a_renamed_index_is_listed_rather_than_reported_missing(isolated, tmp_path):
+    """The listing must resolve the database the way opening it does.
+
+    `db_path` finds an index by the tables in it, so a renamed or forked
+    database opens and searches normally — but the registry still asked for
+    `dyprys.sqlite` by name, so `dyp library list` printed "no index yet" and
+    dashes beside a 3,453-book library that every other command read fine.
+    """
+    path = _index(tmp_path, "lib")
+    (path / "dyprys.sqlite").rename(path / "cyprys.sqlite")
+
+    entry = registry.Library(name="forked", path=path)
+    assert entry.exists, "an index this build can open must not read as absent"
+
+    held = registry.summarise(path)
+    assert held is not None and held.books == 2
+
+
+def test_two_indexes_in_one_directory_do_not_break_the_listing(isolated, tmp_path):
+    """`db_path` refuses to guess between them; a listing may say nothing about
+    that library, but must still name the others rather than raising."""
+    path = _index(tmp_path, "lib")
+    import shutil
+    shutil.copy(path / "dyprys.sqlite", path / "other.sqlite")
+    (path / "dyprys.sqlite").rename(path / "cyprys.sqlite")
+
+    assert registry.summarise(path) is None
+
+
 def test_summarise_survives_a_file_that_is_not_a_database(isolated, tmp_path):
     """A foreign or half-written file must not take down `dyp library list`."""
     fake = tmp_path / "fake"
