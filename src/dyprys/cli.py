@@ -754,6 +754,10 @@ def _embed(conn, directory, args) -> int:
         print("\n  finishing the current batch, then stopping "
               "(Ctrl-C again to stop now) …", file=sys.stderr, flush=True)
 
+    # Resolved once: the run is made at this share of the time and the
+    # journal records the same number, so a rate read back later can be
+    # divided by what actually produced it.
+    duty = max(1, min(100, args.duty)) / 100
     previous = signal.signal(signal.SIGINT, on_interrupt)
     try:
         with exclusive(directory, "embed"):
@@ -766,7 +770,7 @@ def _embed(conn, directory, args) -> int:
                 progress=show,
                 book_ids=scope,
                 chunking_id=chosen,
-                duty=max(1, min(100, args.duty)) / 100,
+                duty=duty,
             )
     except AlreadyRunning as busy:
         print(f"\n{busy}", file=sys.stderr)
@@ -782,7 +786,8 @@ def _embed(conn, directory, args) -> int:
 
     print(file=sys.stderr)
     elapsed = time.monotonic() - started          # same clock as `started`
-    db.record_run(conn, model_id, began, elapsed, report, time.time() - started_wall)
+    db.record_run(conn, model_id, began, elapsed, report,
+                  time.time() - started_wall, duty=duty)
     if report.stopped != "complete":
         reason = {"time": "the time limit", "limit": "the chunk limit",
                   "interrupted": "your request"}[report.stopped]

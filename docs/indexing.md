@@ -127,6 +127,15 @@ it resumes — but a 45-min run then spans hours of wall clock). `--duty 80` giv
 ~79% of full speed for 80% of the time; there is no thermal headroom to reclaim.
 `taskpolicy -b dyp embed` is a non-adjustable ~88%-speed alternative.
 
+The duty a run was made at is recorded with it, and the rates quoted by
+`dyp check` and `dyp models --drop` are divided by it — so they are the speed
+the machine manages **flat out**, whether or not the runs behind them were
+throttled. Without that, a library embedded at `--duty 90` would report its own
+throttle as the machine's limit for ever, and a median taken over a throttled
+run and an unthrottled one would be a median over two different quantities. To
+predict a throttled run, multiply back down by the duty you mean to use. Runs
+recorded before this was kept have no duty stored and are read as full speed.
+
 ## `dyp route` — enable the fast path
 
 Profiles each book into spherical k-means centroids so `--route` can skip most of

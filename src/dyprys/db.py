@@ -27,7 +27,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 DEFAULT_DATA_DIR = Path("data")
 DB_FILENAME = "dyprys.sqlite"
@@ -290,6 +290,11 @@ CREATE TABLE IF NOT EXISTS embed_runs (
     -- the span was spent working. NULL on runs recorded before v12.
     wall_seconds REAL,
     embedded   INTEGER NOT NULL,
+    -- Share of wall time this run spent working, 1.0 being flat out. The pause
+    -- is between batches and proportional to the batch just done, so the
+    -- working fraction *is* this number and a rate divided by it is the rate
+    -- the machine would have managed unthrottled. NULL on runs before v15.
+    duty       REAL,
     copied     INTEGER NOT NULL DEFAULT 0,
     failed     INTEGER NOT NULL DEFAULT 0,
     stopped    TEXT    NOT NULL    -- complete | time | limit | interrupted
@@ -386,6 +391,12 @@ def _check_schema_version(conn: sqlite3.Connection) -> None:
         # every existing model is, and the first embed binds it -- so an index
         # with one chunking, which is nearly all of them, notices nothing.
         _add_column(conn, "models", "chunking_id", "INTEGER")
+        # v15 records the duty a run was made at. Without it the rates of a
+        # throttled run and a flat-out one are stored as though comparable, and
+        # a median over both is a median of two different quantities. NULL
+        # means "not recorded", which every older row is and which is read as
+        # full speed -- the assumption those rows were already being used under.
+        _add_column(conn, "embed_runs", "duty", "REAL")
         # v13 adds the `asked` table, which CREATE TABLE IF NOT EXISTS above has
         # already made; nothing to migrate, only the version to move.
         for column, spec in (("file_name", "TEXT"), ("file_bytes", "INTEGER"),
@@ -535,7 +546,8 @@ def record_event(conn: sqlite3.Connection, action: str, detail: str) -> None:
 
 
 def record_run(conn: sqlite3.Connection, model_id: int, started: str,
-               seconds: float, report, wall: float | None = None) -> None:
+               seconds: float, report, wall: float | None = None,
+               duty: float | None = None) -> None:
     """Note what one embedding run achieved, once it has stopped.
 
     `seconds` is monotonic and `wall` is wall clock over the same span. Keeping
@@ -547,9 +559,10 @@ def record_run(conn: sqlite3.Connection, model_id: int, started: str,
     with conn:
         conn.execute(
             "INSERT INTO embed_runs (model_id, started_at, seconds, wall_seconds, "
-            "embedded, copied, failed, stopped) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (model_id, started, seconds, wall, report.embedded, report.copied,
-             report.failed, report.stopped),
+            "embedded, duty, copied, failed, stopped) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (model_id, started, seconds, wall, report.embedded, duty,
+             report.copied, report.failed, report.stopped),
         )
 
 
@@ -627,19 +640,33 @@ def forget_questions(conn: sqlite3.Connection, before: str | None = None,
 
 
 def observed_rate(conn: sqlite3.Connection, model_id: int) -> float | None:
-    """Median chunks/s over recent runs, or None if there is no history.
+    """Median unthrottled chunks/s over recent runs, or None with no history.
 
     Median rather than mean: one run that spanned a laptop's idle sleep, or one
     that stopped two seconds after starting, should not move the estimate.
+
+    Each run is divided by the duty it was made at first, because otherwise the
+    median is taken over quantities that are not the same thing. `--duty` pauses
+    between batches in proportion to the batch just done, so the share of time
+    spent working *is* the duty and the division is exact rather than fitted --
+    a run at 0.9 and a run at 1.0 differ by a factor the index knows. Left
+    unnormalised, three real runs of one model read as 67.8, 69.5 and 93.7
+    chunks/s and their median as 69.5, when the machine's rate was near enough
+    constant and the spread was mostly the throttle being asked for.
+
+    Returns the rate flat out, so an estimate built on it is what the work would
+    take unthrottled. Multiply by a duty to predict a throttled run.
     """
-    rates = [
-        row["embedded"] / row["seconds"]
-        for row in conn.execute(
-            "SELECT embedded, seconds FROM embed_runs WHERE model_id = ? "
-            "AND seconds > 30 AND embedded > 0 ORDER BY id DESC LIMIT 10",
-            (model_id,),
-        )
-    ]
+    rates = []
+    for row in conn.execute(
+        "SELECT embedded, seconds, duty FROM embed_runs WHERE model_id = ? "
+        "AND seconds > 30 AND embedded > 0 ORDER BY id DESC LIMIT 10",
+        (model_id,),
+    ):
+        # NULL predates v15 and is read as full speed: those rows were already
+        # being used that way, so this changes no existing estimate downwards.
+        duty = row["duty"] if row["duty"] and 0 < row["duty"] <= 1 else 1.0
+        rates.append(row["embedded"] / row["seconds"] / duty)
     if not rates:
         return None
     rates.sort()

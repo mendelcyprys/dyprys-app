@@ -285,3 +285,53 @@ def test_a_new_index_is_created_under_our_own_name(tmp_path):
     db.connect(tmp_path).close()
     assert (tmp_path / db.DB_FILENAME).exists()
     assert db.db_path(tmp_path).name == db.DB_FILENAME
+
+
+def test_a_throttled_run_reports_the_rate_it_would_have_managed(tmp_path):
+    """`--duty` pauses between batches, so the working share *is* the duty.
+
+    Stored raw, a run at 0.5 and a run at 1.0 on the same machine look like two
+    different speeds, and a median over both is a median of two quantities.
+    Dividing by the duty that produced each makes them the one thing they are.
+    """
+    conn = db.connect(tmp_path / "ix")
+    model = db.model_id(conn, "m@aaaaaaaaaaaa", 8)
+    report = type("R", (), {"embedded": 600, "copied": 0, "failed": 0,
+                            "stopped": "complete"})()
+
+    # 600 chunks in 60s at half duty: it was working for 30s, so 20/s flat out.
+    db.record_run(conn, model, "2026-01-01T00:00:00+00:00", 60, report, duty=0.5)
+    assert db.observed_rate(conn, model) == pytest.approx(20.0)
+
+    # An unthrottled run of the same machine agrees, so the median is stable.
+    db.record_run(conn, model, "2026-01-01T01:00:00+00:00", 30, report, duty=1.0)
+    assert db.observed_rate(conn, model) == pytest.approx(20.0)
+    conn.close()
+
+
+def test_a_run_recorded_before_duty_was_kept_is_read_as_full_speed(tmp_path):
+    """NULL duty is every pre-v15 row. Reading it as anything but 1.0 would
+    silently restate estimates those rows were already being used for."""
+    conn = db.connect(tmp_path / "ix")
+    model = db.model_id(conn, "m@bbbbbbbbbbbb", 8)
+    with conn:
+        conn.execute(
+            "INSERT INTO embed_runs (model_id, started_at, seconds, embedded, stopped) "
+            "VALUES (?, '2026-01-01T00:00:00+00:00', 60, 600, 'complete')", (model,))
+
+    assert db.observed_rate(conn, model) == pytest.approx(10.0)
+    conn.close()
+
+
+def test_a_nonsense_duty_does_not_multiply_the_rate(tmp_path):
+    """A zero or out-of-range duty must not divide the rate into a fantasy."""
+    conn = db.connect(tmp_path / "ix")
+    model = db.model_id(conn, "m@cccccccccccc", 8)
+    for bad in (0.0, -1.0, 5.0):
+        with conn:
+            conn.execute(
+                "INSERT INTO embed_runs (model_id, started_at, seconds, embedded, "
+                "duty, stopped) VALUES (?, '2026-01-01T00:00:00+00:00', 60, 600, ?, "
+                "'complete')", (model, bad))
+    assert db.observed_rate(conn, model) == pytest.approx(10.0)
+    conn.close()
