@@ -245,3 +245,43 @@ def test_naive_timestamps_are_read_as_utc():
     naive = (datetime.now(timezone.utc) - timedelta(minutes=4)).replace(
         tzinfo=None).isoformat(timespec="seconds")
     assert _ago(naive) == "4m ago"
+
+
+def test_a_book_that_extracted_to_nothing_is_reported(conn, tmp_path):
+    """A file that yielded no text is unsearchable and nothing else notices.
+
+    `garbled_books` samples a book's chunks for word boundaries and a book
+    with no chunks has none to sample; drift compares bytes on disk against
+    what was ingested and both agree; coverage is a share of zero, which is
+    complete. So it is listed, counted and called intact for ever.
+    """
+    from dyprys.check import empty_books, survey
+    from dyprys.ingest import ingest_paths
+
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "real.txt").write_text(
+        "\n\n".join(f"Paragraph {n} about neurons. " * 9 for n in range(12)),
+        encoding="utf-8")
+    # What a failed PDF extraction leaves: a file, and effectively nothing in it.
+    (lib / "failed.txt").write_text("\n", encoding="utf-8")
+    ingest_paths(conn, [lib])
+
+    empties = empty_books(conn)
+    assert [e.title for e in empties] == ["failed"]
+    assert empties[0].bytes_on_disk <= 2
+    assert [e.title for e in survey(conn).empty] == ["failed"]
+
+
+def test_a_book_with_text_is_not_called_empty(conn, tmp_path):
+    """The check is a fact, not a threshold: any chunk at all is not empty."""
+    from dyprys.check import empty_books
+    from dyprys.ingest import ingest_paths
+
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "small.txt").write_text("One short sentence that still chunks.\n",
+                                   encoding="utf-8")
+    ingest_paths(conn, [lib])
+
+    assert empty_books(conn) == []

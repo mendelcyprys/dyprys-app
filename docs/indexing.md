@@ -43,6 +43,24 @@ The test is longest-word length (real English ~12 chars at the 90th percentile;
 lost-space text ~80). **The only fix is re-extracting with a different tool, or
 `dyp remove`.** Nothing downstream repairs it.
 
+A file that extracted to *nothing* is reported separately, and needs no
+threshold: a book with a source on disk and no chunks cannot be returned by any
+query, and no other check sees it — there are no chunks to sample for word
+boundaries, drift compares bytes against what was ingested and both agree, and
+coverage is a share of zero, which is complete.
+
+**Both checks together are not a clean bill of health.** A third failure —
+extraction that keeps every word and destroys their order, which is what
+multi-column slides do — is not detected, and measurement says it is not
+cheaply detectable. On a real library the damaged deck and an undamaged deck
+from the same shelf were statistically indistinguishable: short-token fraction
+15.3% against 15.2%, capitalised-token fraction 51.7% against 58.6%. Those
+numbers separate *slides from prose*, not damage from health, and any threshold
+that caught the broken one would have condemned the sound one. Telling scrambled
+word order from legitimately fragmentary text needs a judgement about word
+order, not a statistic over tokens. The symptom to watch for is a returned
+passage whose words are all plausible and whose order is not.
+
 ### Chunk size (`--target`)
 
 Default ~3,600 bytes (~a page, ~900 tokens). Two constraints before changing it:

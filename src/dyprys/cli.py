@@ -605,10 +605,22 @@ def _add(conn, args) -> int:
 
     # Cheapest possible moment to learn a PDF extracted as gibberish: before any
     # GPU has been spent on it, while re-extracting is still just a re-run.
-    from dyprys.check import garbled_books
+    from dyprys.check import empty_books, garbled_books
     fresh = {row["id"] for row in conn.execute(
         "SELECT id FROM books WHERE key IN (%s)" % ",".join("?" * len(results)),
         [str(r.key) for r in results])} if results else set()
+    # A file that yielded nothing at all fails the same way, one step earlier:
+    # there are no chunks to sample for word boundaries, so the check above
+    # cannot see it and the book joins the library unsearchable and unremarked.
+    nothing = empty_books(conn, only=fresh)
+    if nothing:
+        print(f"\n{len(nothing)} book(s) produced no text to search:", file=sys.stderr)
+        for e in nothing[:5]:
+            print(f"  {_size(e.bytes_on_disk):>8} on disk  {e.title[:52]}", file=sys.stderr)
+        if len(nothing) > 5:
+            print(f"  … and {len(nothing) - 5} more", file=sys.stderr)
+        print("extraction produced an empty or near-empty file — re-extract it, or "
+              "`dyp remove` it.", file=sys.stderr)
     broken = garbled_books(conn, only=fresh)
     if broken:
         chunks = sum(b.chunks for b in broken)
@@ -2940,6 +2952,10 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
             "garbled": [
                 {"title": g.title, "chunks": g.chunks, "p90_token": g.p90_token}
                 for g in report.garbled],
+            # Distinct from `garbled`: those have unusable text, these have none.
+            "empty": [
+                {"title": e.title, "key": e.key, "bytes_on_disk": e.bytes_on_disk}
+                for e in report.empty],
             "models": [
                 {"name": m.name, "dim": m.dim, "embedded": m.embedded,
                  "to_copy": m.to_copy, "to_embed": m.to_embed, "failed": m.failed,
@@ -2987,6 +3003,19 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
               "the same as", file=sys.stderr)
         print("  real text and can never match a query; re-extract them or "
               "`dyp remove` them.", file=sys.stderr)
+
+    if report.empty:
+        print(f"\n{len(report.empty)} book(s) with a file on disk but no text to "
+              f"search", file=sys.stderr)
+        for e in report.empty[:5]:
+            print(f"      {_size(e.bytes_on_disk):>8} on disk  {e.title[:52]}",
+                  file=sys.stderr)
+        if len(report.empty) > 5:
+            print(f"      … and {len(report.empty) - 5} more", file=sys.stderr)
+        print("  extraction produced nothing. They are listed and counted but no "
+              "query can", file=sys.stderr)
+        print("  return them; re-extract them or `dyp remove` them.",
+              file=sys.stderr)
 
     if not report.models:
         print("\nno embedding model registered yet")
