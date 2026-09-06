@@ -2685,8 +2685,20 @@ def _models(conn, directory, args) -> int:
         print(f"  {victim.embedded:,} embedded chunks and {_size(victim.bytes_on_disk)} on disk")
         print("  books, chunks and the BM25 index are untouched")
         if not args.yes:
-            print("\nre-run with --yes to go ahead. Re-embedding this model would take "
-                  f"about {victim.embedded / 6.6 / 3600:.1f} h.", file=sys.stderr)
+            # What it would cost to undo this, measured for *this* model rather
+            # than assumed. A fixed rate is right for whichever model it was
+            # taken from and wrong for the rest: 6.6/s told a 69.5/s model its
+            # 22 minutes of work were 3.8 hours, in the one prompt where the
+            # number exists to inform a decision that cannot be reversed.
+            rate = db.observed_rate(conn, victim.id)
+            if rate:
+                cost = (f" Re-embedding it would take about "
+                        f"{victim.embedded / rate / 3600:.1f} h at {rate:.1f} "
+                        f"chunks/s, this model's measured median.")
+            else:
+                cost = (" It has no finished runs on this machine, so there is "
+                        "no rate to estimate re-embedding from.")
+            print(f"\nre-run with --yes to go ahead.{cost}", file=sys.stderr)
             return 1
         for path in drop_model(conn, directory, victim.id):
             print(f"removed {path.name}")

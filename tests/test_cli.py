@@ -836,6 +836,70 @@ def test_rerank_given_the_model_file_says_which_flag_wanted_it(tmp_path):
     assert "--reranker" not in str(plain.value)
 
 
+def test_dropping_a_model_costs_what_that_model_actually_runs_at(tmp_path, capsys):
+    """The undo cost in a destructive prompt must be measured, not assumed.
+
+    A fixed chunks/s is right for whichever model it was taken from and wrong
+    for every other: at a hardcoded 6.6/s a model that really runs at 69.5/s
+    was told its 22 minutes of re-embedding were 3.8 hours — in the one place
+    the number exists to inform a decision that cannot be taken back.
+    """
+    from dyprys import db as _db
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 9 for n in range(20)),
+                    encoding="utf-8")
+    data = tmp_path / "ix"
+    assert main(["--data", str(data), "add", str(book)]) == 0
+
+    conn = _db.connect(data)
+    model = _db.model_id(conn, "fast@aaaaaaaaaaaa", 8)
+    with conn:
+        for seg in conn.execute("SELECT id, chunk_count FROM segments").fetchall():
+            _db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+        # 7,200 chunks in an hour = exactly 2.0/s, so the arithmetic is checkable
+        conn.execute(
+            "INSERT INTO embed_runs (model_id, started_at, seconds, embedded, stopped) "
+            "VALUES (?, '2026-01-01T00:00:00+00:00', 3600, 7200, 'complete')", (model,))
+    embedded = conn.execute(
+        "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress WHERE model_id = ?",
+        (model,)).fetchone()[0]
+    conn.close()
+    capsys.readouterr()
+
+    assert main(["--data", str(data), "models", "--drop", "fast"]) == 1
+    err = capsys.readouterr().err
+    assert "2.0 chunks/s" in err, err
+    assert f"{embedded / 2.0 / 3600:.1f} h" in err, err
+
+
+def test_dropping_a_model_with_no_history_says_so_rather_than_guessing(tmp_path, capsys):
+    """No runs to measure is a fact worth stating, not a reason to invent a rate."""
+    from dyprys import db as _db
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 9 for n in range(12)),
+                    encoding="utf-8")
+    data = tmp_path / "ix"
+    assert main(["--data", str(data), "add", str(book)]) == 0
+    conn = _db.connect(data)
+    model = _db.model_id(conn, "untimed@bbbbbbbbbbbb", 8)
+    with conn:
+        for seg in conn.execute("SELECT id, chunk_count FROM segments").fetchall():
+            _db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+    conn.close()
+    capsys.readouterr()
+
+    assert main(["--data", str(data), "models", "--drop", "untimed"]) == 1
+    err = capsys.readouterr().err
+    assert "no rate to estimate" in err
+    import re as _re
+    tail = err.split("re-run with --yes")[-1]
+    assert not _re.search(r"\d+(\.\d+)?\s*h\b", tail), f"invented an estimate: {tail!r}"
+
+
 def test_models_json_with_no_model_is_empty_and_missing(tmp_path, capsys):
     """An index with no embedding model: valid JSON, empty list, exit 1 (a miss),
     the same as the human path returning non-zero."""
