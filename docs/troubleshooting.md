@@ -13,6 +13,8 @@ anything (`dyp check --deep` re-hashes rather than trusting timestamps).
 | `no passage matched` | lexical-only search found no words, or `-c` matched nothing | rephrase; drop or widen the scope |
 | `-c` returns nothing | pattern typo | `dyp books PATTERN` shows what it matches |
 | wrong book, plausible passage | `--route` narrowed past it | drop `--route` and retry |
+| a book you know is embedded never appears under `--route` | it was embedded after the last `dyp route`, so it has no profile and stage 1 cannot reach it | `dyp route`; `dyp check` counts the books waiting, and search warns when it is routing around any |
+| `this index has N models` | several models, none named | `--model` with any unique part of a name; `dyp models` lists handles, `dyp models --name NAME ALIAS` shortens one |
 | only result is wrong | reading just the first | `-k 10`; answer is first ~6/10, top-five ~8/10 |
 | a low `cos` with `words N` | literal match, not topical | expected — the passage shares words without being about the subject |
 | one/two-word query, thin results | too short to form a phrase | add words, or quote an exact term |

@@ -119,6 +119,45 @@ def test_both_chunkings_of_a_book_are_shown(conn, stocked):
     assert book.chunks == sum(c.chunks for c in book.chunkings)
 
 
+def test_progress_is_measured_against_the_chunking_the_model_embeds(
+    conn, tmp_path, library
+):
+    """A model bound to one chunking is finished when *that* one is done.
+
+    Divided by the book's chunks across every chunking instead, a model that
+    has embedded all of its own reads as part-way for ever, and can never
+    reach "all" in a library split more than one way.
+    """
+    ingest_paths(conn, [library], target=1200, overlap=200)
+    coarse, fine = (r["id"] for r in conn.execute("SELECT id FROM chunkings ORDER BY id"))
+    model = db.model_id(conn, "stub-model@abc", DIM)
+    db.bind_chunking(conn, model, coarse)
+    with conn:
+        for seg in conn.execute(
+            "SELECT id, chunk_count FROM segments WHERE chunking_id = ?", (coarse,)
+        ).fetchall():
+            db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+
+    book = books(conn, "book0")[0]
+    mine = next(c.chunks for c in book.chunkings if c.id == coarse)
+
+    assert book.live_for("stub-model@abc") == mine
+    assert book.live_for("stub-model@abc") < book.chunks, "the fixture must be split two ways"
+    assert book.per_model["stub-model@abc"] == mine, "every chunk of its own chunking"
+    # The property the display depends on: done >= live, so it renders "all".
+    assert book.per_model["stub-model@abc"] >= book.live_for("stub-model@abc")
+
+
+def test_an_unbound_model_falls_back_to_the_whole_book(conn, stocked):
+    """Bound to nothing (pre-v14, or never embedded), the book total is right."""
+    model, _ = stocked
+    with conn:
+        conn.execute("UPDATE models SET chunking_id = NULL WHERE id = ?", (model,))
+
+    book = books(conn, "book0")[0]
+    assert book.live_for("stub-model@abc") == book.chunks
+
+
 def test_a_missing_source_file_is_flagged(conn, stocked, library):
     (library / "book0.txt").unlink()
 

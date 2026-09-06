@@ -10,6 +10,7 @@ from dyprys.vectors import VectorStore
 from dyprys.routing import (
     build_centroids,
     is_built,
+    profile_gap,
     route,
     scanned_fraction,
     spherical_kmeans,
@@ -199,6 +200,53 @@ def test_embedding_more_makes_a_profile_stale(conn, tmp_path, routable):
         db.set_embedded_prefix(conn, model, segment["id"], segment["chunk_count"])
 
     assert stale_books(conn, model) == 1
+    assert profile_gap(conn, model).drifted == 1
+    assert profile_gap(conn, model).unprofiled == 0
+
+
+def test_a_book_embedded_after_routing_counts_as_needing_a_rerun(
+    conn, tmp_path, routable, library
+):
+    """The blind spot: a book with vectors and no centroid row at all.
+
+    Counting only the `book_centroids` rows that exist cannot see it -- there
+    is no row to find stale -- so the index reported a current profile while
+    `--route` could not return the book at any rank.
+    """
+    model, store, _ = routable
+    build_centroids(conn, tmp_path / "index", store, model, per_book=4)
+    assert stale_books(conn, model) == 0
+
+    fresh = library / "late.txt"
+    fresh.write_text("a book that arrived after the profile was built\n" * 40)
+    ingest_paths(conn, [fresh])
+    for seg in conn.execute(
+        "SELECT seg.id, seg.chunk_count FROM segments seg "
+        "JOIN sources src ON src.id = seg.source_id "
+        "JOIN books b ON b.id = src.book_id WHERE b.title = 'late'"
+    ).fetchall():
+        with conn:
+            db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+
+    gap = profile_gap(conn, model)
+    assert gap.unprofiled == 1, "a book with vectors but no centroids is unreachable"
+    assert gap.drifted == 0
+    assert stale_books(conn, model) == 1
+
+
+def test_a_book_with_no_vectors_is_not_counted_as_needing_a_rerun(
+    conn, tmp_path, routable, library
+):
+    """`route` skips empty books by design, so they are not a gap."""
+    model, store, _ = routable
+    build_centroids(conn, tmp_path / "index", store, model, per_book=4)
+
+    fresh = library / "unembedded.txt"
+    fresh.write_text("added but never embedded\n" * 40)
+    ingest_paths(conn, [fresh])
+
+    assert profile_gap(conn, model).unprofiled == 0
+    assert stale_books(conn, model) == 0
 
 
 def test_routing_before_building_returns_nothing(conn, tmp_path, routable):

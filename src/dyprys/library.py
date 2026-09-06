@@ -138,10 +138,25 @@ class BookInfo:
     chunkings: list[ChunkingInfo] = field(default_factory=list)
     lexical: int = 0
     per_model: dict[str, int] = field(default_factory=dict)
+    # model name -> the chunking it embeds, so progress has the right divisor
+    model_chunking: dict[str, int | None] = field(default_factory=dict)
 
     @property
     def chunks(self) -> int:
         return sum(c.chunks for c in self.chunkings)
+
+    def live_for(self, model: str) -> int:
+        """This book's chunks under the one chunking `model` embeds.
+
+        The same rule `models()` applies library-wide: a model embeds one
+        chunking, so dividing its progress by a book's chunks across *every*
+        chunking reads as under 100% for a book it has finished -- and no
+        model can ever reach "all" in a library split more than one way.
+        """
+        chunking = self.model_chunking.get(model)
+        if chunking is None:
+            return self.chunks
+        return sum(c.chunks for c in self.chunkings if c.id == chunking)
 
 
 def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo]:
@@ -179,10 +194,15 @@ def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo
         if book is not None:
             book.chunkings.append(ChunkingInfo(ch["id"], ch["target"], ch["overlap"], ch["n"]))
 
-    names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM models ORDER BY id")}
+    models_by_id = {
+        r["id"]: (r["name"], r["chunking_id"])
+        for r in conn.execute("SELECT id, name, chunking_id FROM models ORDER BY id")
+    }
+    names = {mid: name for mid, (name, _) in models_by_id.items()}
     for book in books_by_id.values():
-        for name in names.values():
+        for name, chunking in models_by_id.values():
             book.per_model[name] = 0
+            book.model_chunking[name] = chunking
     for row in conn.execute(
         "SELECT src.book_id AS book_id, p.model_id, SUM(p.n_embedded) AS done "
         "FROM segment_progress p JOIN segments seg ON seg.id = p.segment_id "

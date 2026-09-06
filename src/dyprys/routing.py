@@ -234,15 +234,66 @@ def is_built(conn: sqlite3.Connection, model_id: int) -> bool:
     )
 
 
+@dataclass
+class ProfileGap:
+    """What a `dyp route` re-run would fix, split by why it is needed.
+
+    Both faults send you to the same command but they are not the same
+    failure. A *drifted* book is profiled and still reachable, just built
+    from an older set of vectors: stage 1 can still choose it, slightly less
+    well. An *unprofiled* book has vectors and no centroids at all, so stage
+    1 cannot choose it however good the query is -- it is simply absent from
+    the candidate set. `--route` still returns k results, so the miss is
+    silent, and the book stays invisible until the next `dyp route`.
+    """
+
+    drifted: int = 0
+    unprofiled: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.drifted + self.unprofiled
+
+
+def profile_gap(conn: sqlite3.Connection, model_id: int) -> ProfileGap:
+    """Books whose routing profile is out of date, or missing entirely.
+
+    Counting only the `book_centroids` rows that exist can never see a book
+    embedded *since* the last run: it has no row, so there is nothing to find
+    drifted. That blind spot is what let a library report a current profile
+    while holding books `--route` could not reach, so the absent rows are
+    counted here too.
+    """
+    profiled = {
+        row["book_id"]: row["built_from"]
+        for row in conn.execute(
+            "SELECT book_id, built_from FROM book_centroids WHERE model_id = ?",
+            (model_id,),
+        )
+    }
+    # One grouped query rather than one per book: `built_from` was written as
+    # this same sum, so the two are directly comparable.
+    embedded = {
+        row["book_id"]: row["n"]
+        for row in conn.execute(
+            "SELECT src.book_id AS book_id, SUM(p.n_embedded) AS n "
+            "FROM segment_progress p "
+            "JOIN segments seg ON seg.id = p.segment_id "
+            "JOIN sources src ON src.id = seg.source_id "
+            "WHERE p.model_id = ? AND p.n_embedded > 0 "
+            "GROUP BY src.book_id",
+            (model_id,),
+        )
+    }
+    return ProfileGap(
+        drifted=sum(1 for b, built in profiled.items() if embedded.get(b, 0) != built),
+        unprofiled=sum(1 for b in embedded if b not in profiled),
+    )
+
+
 def stale_books(conn: sqlite3.Connection, model_id: int) -> int:
-    """Books whose embedded chunk count no longer matches their profile."""
-    stale = 0
-    for row in conn.execute(
-        "SELECT book_id, built_from FROM book_centroids WHERE model_id = ?", (model_id,)
-    ).fetchall():
-        if _embedded_chunks(conn, model_id, row["book_id"]) != row["built_from"]:
-            stale += 1
-    return stale
+    """How many books a `dyp route` re-run would fix.  Zero means reachable."""
+    return profile_gap(conn, model_id).total
 
 
 def route(

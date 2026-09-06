@@ -327,6 +327,10 @@ def build_parser() -> argparse.ArgumentParser:
     wa = sub.add_parser("watch", help="follow an embedding run already in progress")
     wa.add_argument("--every", type=float, default=2.0, metavar="SECONDS",
                     help="how often to refresh (default 2)")
+    wa.add_argument("--wait", type=float, default=15.0, metavar="SECONDS",
+                    help="how long to wait for a run to appear before giving up "
+                         "(default 15; an embed loads its weights before it locks "
+                         "the index). 0 checks once and returns.")
 
     check = sub.add_parser("check", help="what has drifted and what work is outstanding")
     check.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
@@ -384,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "asked":
             return _asked(conn, args)
         if args.command == "watch":
-            return _watch(conn, _where(args), args.every)
+            return _watch(conn, _where(args), args.every, args.wait)
         if args.command == "status":
             return _status(conn, args.json)
         if args.command == "check":
@@ -1020,13 +1024,20 @@ def next_step(conn) -> str | None:
     if not report.models:
         return "embed it — `dyp embed --model PATH.gguf` (remembered after the first run)"
 
-    model = max(report.models, key=lambda m: m.embedded)
-    if model.to_embed or model.to_copy:
-        outstanding = model.to_embed + model.to_copy
-        return f"embed the remaining {outstanding:,} chunk(s) — `dyp embed`"
-    row = conn.execute("SELECT id FROM models ORDER BY id").fetchone()
-    model_id = row["id"] if row else None
-    if model_id is not None:
+    # Every model, not just the busiest one. Asking only the model furthest
+    # ahead means a second model can sit with hours of embedding outstanding
+    # while this line reports the next thing after it -- or nothing at all.
+    behind = [m for m in report.models if m.to_embed or m.to_copy]
+    if behind:
+        outstanding = sum(m.to_embed + m.to_copy for m in behind)
+        whose = f" for {_shorten(behind[0].name)}" if len(report.models) > 1 else ""
+        return f"embed the remaining {outstanding:,} chunk(s){whose} — `dyp embed`"
+
+    ids = {r["name"]: r["id"] for r in conn.execute("SELECT id, name FROM models")}
+    for m in report.models:
+        model_id = ids.get(m.name)
+        if model_id is None:
+            continue
         if not is_built(conn, model_id):
             return "profile the books so search can skip most of them — `dyp route`"
         if stale_books(conn, model_id):
@@ -1290,16 +1301,45 @@ def _model_being_embedded(conn):
     return None if best is None else (best[1], best[2], best[3])
 
 
-def _watch(conn, directory, every: float) -> int:
+def _await_embed(directory, grace: float, tick: float = 0.25):
+    """The pid of an embed, waiting out the gap before it takes the lock.
+
+    `dyp embed` loads its weights *before* it locks the index -- seconds on a
+    large model -- so the index is unlocked while a run is plainly starting.
+    Watching from the terminal next door lands inside that window nearly every
+    time, and answering "no embedding run in progress" for a run that is
+    starting reads as "your embed died", which sends people to start a second
+    one. So wait a little for it to appear before saying nothing is there.
+    """
+    from dyprys.lock import holder
+
+    deadline = time.monotonic() + grace
+    waited = False
+    while True:
+        pid = holder(directory, "embed")
+        if pid is not None:
+            if waited:
+                print(file=sys.stderr)
+            return pid
+        if time.monotonic() >= deadline:
+            if waited:
+                print(file=sys.stderr)
+            return None
+        if not waited:  # only once we know there is something to wait for
+            print("waiting for an embedding run to start "
+                  "(Ctrl-C to stop) …", file=sys.stderr, flush=True)
+            waited = True
+        time.sleep(tick)
+
+
+def _watch(conn, directory, every: float, wait: float = 0.0) -> int:
     """Follow an embed started elsewhere, by reading what it commits.
 
     Not coupled to the running process at all: progress is committed per batch,
     so any reader sees it advance. That is why this works from another terminal,
     over ssh, or after the terminal that started the job has gone.
     """
-    from dyprys.lock import holder
-
-    pid = holder(directory, "embed")
+    pid = _await_embed(directory, wait)
     if pid is None:
         print("no embedding run in progress here.", file=sys.stderr)
         print("`dyp check` for what is outstanding; `dyp embed` to start one.",
@@ -1408,10 +1448,17 @@ def _weights_for(conn, model_arg):
         if given:
             return None, (f"no model matches {given!r}, and it is not a file. "
                           f"`dyp models` lists what this index knows.")
-        registered = conn.execute("SELECT COUNT(*) FROM models").fetchone()[0]
-        if registered > 1:
-            return None, ("this index has several models — say which with "
-                          "--model NAME. `dyp models` lists them.")
+        rows = conn.execute("SELECT name, alias FROM models ORDER BY id").fetchall()
+        if len(rows) > 1:
+            # Listing them here costs one query we have already made and saves
+            # the round trip through `dyp models` -- and any unique substring
+            # of a name works, so the whole name never has to be typed.
+            choices = "\n".join(
+                f"  --model {_handle(r['name'], r['alias'])!r}" for r in rows)
+            return None, (f"this index has {len(rows)} models — say which with "
+                          f"--model:\n{choices}\n"
+                          f"any unique part of a name works; "
+                          f"`dyp models --name NAME ALIAS` sets a short one.")
         return None, ("no model yet: pass --model PATH.gguf or set $DYPRYS_MODEL. "
                       "It is remembered after the first run.")
 
@@ -2188,12 +2235,21 @@ def _router(conn, directory, embedder, model_id, books_wanted, candidates):
     """Stage 1 as a callable, or None when routing was not asked for."""
     if not books_wanted:
         return None, None
-    from dyprys.routing import is_built, route
+    from dyprys.routing import is_built, profile_gap, route
     from dyprys.vectors import VectorStore
 
     if not is_built(conn, model_id):
         print("no routing profile yet — run `dyp route`", file=sys.stderr)
         return None, "missing"
+
+    # A book embedded since the last `dyp route` has no centroids, so stage 1
+    # can never choose it. The search still returns k results and exits 0, so
+    # without this line the omission is invisible -- the one failure mode a
+    # reader has no way to detect from the output.
+    unprofiled = profile_gap(conn, model_id).unprofiled
+    if unprofiled:
+        print(f"--route cannot reach {unprofiled} book(s) embedded since the last "
+              f"`dyp route`; run it to include them.", file=sys.stderr)
 
     total = conn.execute(
         "SELECT COALESCE(SUM(centroid_count), 0) FROM book_centroids WHERE model_id = ?",
@@ -2246,6 +2302,9 @@ def _books(conn, pattern=None, as_json: bool = False) -> int:
                     {"id": c.id, "target": c.target, "overlap": c.overlap,
                      "chunks": c.chunks} for c in b.chunkings],
                 "embedded": dict(b.per_model),
+                # The denominator that goes with `embedded`, per model: this
+                # book's chunks under the one chunking that model embeds.
+                "live_chunks": {name: b.live_for(name) for name in b.per_model},
             }
             for b in found]})
 
@@ -2266,7 +2325,8 @@ def _books(conn, pattern=None, as_json: bool = False) -> int:
                       f"  →  {ch.chunks:,} chunks")
             print(f"  BM25 indexed   {book.lexical:,} of {book.chunks:,}")
             for name, done in book.per_model.items():
-                share = f"{done / book.chunks:.0%}" if book.chunks else "--"
+                live = book.live_for(name)
+                share = f"{done / live:.0%}" if live else "--"
                 print(f"  {_shorten(name, 14):<14} {done:>7,} embedded  {share}")
         return 0
 
@@ -2280,12 +2340,13 @@ def _books(conn, pattern=None, as_json: bool = False) -> int:
         per = ""
         for name in models:
             done = book.per_model.get(name, 0)
-            if not book.chunks:
+            live = book.live_for(name)
+            if not live:
                 per += f"  {'—':>12}"
-            elif done >= book.chunks:
+            elif done >= live:
                 per += f"  {'all':>12}"
             elif done:
-                per += f"  {done / book.chunks:>11.0%} "
+                per += f"  {done / live:>11.0%} "
             else:
                 per += f"  {'':>12}"
         print(f"{title:<{width}}  {book.chunks:>8,}  {len(book.sources):>5}  {lex:>6}{per}")
@@ -2293,15 +2354,19 @@ def _books(conn, pattern=None, as_json: bool = False) -> int:
     chunks = sum(b.chunks for b in found)
     print(f"\n{len(found):,} books, {chunks:,} chunks")
     # With thousands of books the per-row column is a haystack; the distribution
-    # is the thing you actually came to see.
+    # is the thing you actually came to see. Every figure here is against the
+    # chunking the model embeds -- counted against the library total instead, a
+    # finished model reports every book as part-way and none as complete.
     for name in models:
-        done = sum(min(b.per_model.get(name, 0), b.chunks) for b in found)
-        complete = sum(1 for b in found if b.chunks and b.per_model.get(name, 0) >= b.chunks)
+        mine = sum(b.live_for(name) for b in found)
+        done = sum(min(b.per_model.get(name, 0), b.live_for(name)) for b in found)
+        complete = sum(1 for b in found
+                       if b.live_for(name) and b.per_model.get(name, 0) >= b.live_for(name))
         started = sum(1 for b in found
-                      if 0 < b.per_model.get(name, 0) < b.chunks)
+                      if 0 < b.per_model.get(name, 0) < b.live_for(name))
         untouched = len(found) - complete - started
         print(f"\n{_shorten(name)}")
-        print(f"  {done:>10,} of {chunks:,} chunks  {done / chunks:.0%}" if chunks else "")
+        print(f"  {done:>10,} of {mine:,} chunks  {done / mine:.0%}" if mine else "")
         print(f"  {complete:>10,} books complete")
         if started:
             print(f"  {started:>10,} book(s) part-way")
@@ -2636,7 +2701,7 @@ def _models(conn, directory, args) -> int:
         # What you can type for --model. A name nobody can discover is no better
         # than no name, and the full one above is a hash you would not retype.
         handles = [m.alias] if m.alias else []
-        handles.append(m.name.split("@")[0][-28:] if "@" in m.name else m.name)
+        handles.append(_handle(m.name))
         print(f"    --model  {'  or  '.join(repr(h) for h in handles)}"
               f"{'' if m.alias else '   (dyp models --name … ALIAS for a shorter one)'}")
         if m.file_path:
@@ -2823,13 +2888,18 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
     report = survey(conn, deep=deep)
 
     if as_json:
-        from dyprys.routing import is_built, stale_books
+        from dyprys.routing import is_built, profile_gap
 
         def routing_for(name):
             row = conn.execute("SELECT id FROM models WHERE name = ?", (name,)).fetchone()
             if not row or not is_built(conn, row["id"]):
-                return {"built": False, "stale_books": None}
-            return {"built": True, "stale_books": stale_books(conn, row["id"])}
+                return {"built": False, "stale_books": None,
+                        "drifted_books": None, "unprofiled_books": None}
+            gap = profile_gap(conn, row["id"])
+            # `unprofiled` is the one worth branching on: those books cannot be
+            # returned under --route at all, where a drifted one still can.
+            return {"built": True, "stale_books": gap.total,
+                    "drifted_books": gap.drifted, "unprofiled_books": gap.unprofiled}
 
         return _emit_json({
             "deep": deep,
@@ -2924,15 +2994,32 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
             if not m.outstanding and not m.failed:
                 print("    up to date")
 
-    from dyprys.routing import is_built, stale_books
+    from dyprys.routing import is_built, profile_gap
+    # One line per model, each saying which model it is about: two bare
+    # "routing profile  current" lines cannot be told apart, and with one of
+    # them stale that is exactly when you need to know which.
+    many = len(report.models) > 1
     for m in report.models:
         row = conn.execute("SELECT id FROM models WHERE name = ?", (m.name,)).fetchone()
-        if row and is_built(conn, row["id"]):
-            stale = stale_books(conn, row["id"])
-            note = f"{stale} book(s) changed since — rerun `dyp route`" if stale else "current"
-            print(f"\nrouting profile   {note}")
-        elif row:
-            print("\nrouting profile   not built — run `dyp route` for two-stage search")
+        if not row:
+            continue
+        whose = f"  ({_shorten(m.name)})" if many else ""
+        if not is_built(conn, row["id"]):
+            print(f"\nrouting profile   not built — run `dyp route` for "
+                  f"two-stage search{whose}")
+            continue
+        gap = profile_gap(conn, row["id"])
+        if not gap.total:
+            print(f"\nrouting profile   current{whose}")
+            continue
+        print(f"\nrouting profile   {gap.total} book(s) need `dyp route`{whose}")
+        # Worth separating: a drifted book is still reachable, an unprofiled
+        # one is not reachable at all under --route.
+        if gap.drifted:
+            print(f"    {gap.drifted:>10,} changed since they were profiled")
+        if gap.unprofiled:
+            print(f"    {gap.unprofiled:>10,} never profiled — `--route` cannot "
+                  f"return these at all")
 
     if report.drift.changed:
         print("\nrun `dyp add` on the changed files to re-chunk them;")
@@ -2958,10 +3045,19 @@ def _status(conn, as_json: bool = False) -> int:
         "GROUP BY ch.id ORDER BY ch.id"
     ).fetchall()
     model_rows = conn.execute(
-        "SELECT m.id, m.name, m.dim, COALESCE(SUM(p.n_embedded), 0) AS done "
+        "SELECT m.id, m.name, m.dim, m.chunking_id, "
+        "       COALESCE(SUM(p.n_embedded), 0) AS done "
         "FROM models m LEFT JOIN segment_progress p ON p.model_id = m.id "
         "GROUP BY m.id ORDER BY m.id"
     ).fetchall()
+    # Each model's progress belongs over the chunking it embeds, never over
+    # every chunk in the library: the same divisor `dyp models` already uses.
+    by_chunking = {c["id"]: c["n"] for c in chunkings_rows}
+    live_for = {
+        m["id"]: by_chunking.get(m["chunking_id"], chunks)
+        if m["chunking_id"] is not None else chunks
+        for m in model_rows
+    }
     from dyprys.compact import interrupted
     carries = conn.execute("SELECT COUNT(*) FROM chunk_carry").fetchone()[0]
     fails = conn.execute("SELECT COUNT(*) FROM chunk_failures").fetchone()[0]
@@ -2975,7 +3071,9 @@ def _status(conn, as_json: bool = False) -> int:
                  "chunks": c["n"]} for c in chunkings_rows],
             "models": [
                 {"name": m["name"], "dim": m["dim"], "embedded": m["done"],
-                 "coverage": (m["done"] / chunks) if chunks else 0.0}
+                 "live_chunks": live_for[m["id"]],
+                 "coverage": (m["done"] / live_for[m["id"]])
+                 if live_for[m["id"]] else 0.0}
                 for m in model_rows],
             "pending_carries": carries,
             "failed_chunks": fails,
@@ -2998,10 +3096,21 @@ def _status(conn, as_json: bool = False) -> int:
     if not model_rows:
         print("\nno embedding model registered yet")
     else:
-        print(f"\n{'model':<34} {'dim':>5} {'embedded':>12}")
+        # Which chunking each model embeds only matters once there is more than
+        # one -- but then it matters a lot, because it is the divisor below.
+        split = len(chunkings_rows) > 1
+        targets = {c["id"]: c["target"] for c in chunkings_rows}
+        head = f"\n{'model':<34} {'dim':>5}"
+        print(f"{head} {'chunking':>10} {'embedded':>12}" if split
+              else f"{head} {'embedded':>12}")
         for m in model_rows:
-            pct = f"{m['done'] / chunks:.1%}" if chunks else "--"
-            print(f"{_shorten(m['name']):<34} {m['dim']:>5} {m['done']:>12,} {pct:>7}")
+            live = live_for[m["id"]]
+            pct = f"{m['done'] / live:.1%}" if live else "--"
+            row = f"{_shorten(m['name']):<34} {m['dim']:>5}"
+            if split:
+                target = targets.get(m["chunking_id"])
+                row += f" {(f'{target:,}B' if target else '—'):>10}"
+            print(f"{row} {m['done']:>12,} {pct:>7}")
 
     if interrupted(conn):
         print("\na compaction stopped part-way through — run `dyp compact` to finish it")
@@ -3040,6 +3149,18 @@ def _emit_json(payload) -> int:
 def _shorten(name: str, width: int = 34) -> str:
     """Model names are long paths or hub ids; keep the identifying tail."""
     return name if len(name) <= width else "…" + name[-(width - 1) :]
+
+
+def _handle(name: str, alias: str | None = None) -> str:
+    """Something you can actually type for `--model`.
+
+    Not `_shorten`: that elides the middle to fit a column, and an elided
+    name is not a name -- pasted back it matches nothing. Any unique
+    substring resolves, so drop the @digest and keep an identifying tail.
+    """
+    if alias:
+        return alias
+    return name.split("@")[0][-28:] if "@" in name else name
 
 
 if __name__ == "__main__":
