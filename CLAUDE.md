@@ -40,9 +40,25 @@ Defaults are deliberately fast and literal-safe. Reach for `--expand` and
 `--summarise` only when the request is worth the seconds they cost; they are off
 by default for that reason.
 
+**If the index holds more than one model, every one of these needs `--model
+NAME`** — search refuses rather than guess which vectors to answer from, so on
+such an index the whole table above fails until you say. You never have to type
+the full name: **any unique part of it resolves** (`--model gemma`), `dyp models`
+prints a handle you can paste, `dyp models --name NAME ALIAS` sets a short alias
+once and for all, and `$DYPRYS_MODEL` sets a default for the session. Check with
+`dyp models` before assuming an index has only one.
+
 **Do not add `--expand` when the answer is a rare literal** (a name, a place, an
 odd spelling). It bridges vocabulary, and a rare token has no vocabulary to
 bridge — it only adds noise.
+
+**`--route` can only reach books that have been profiled.** A book embedded
+since the last `dyp route` has no profile, so routed search cannot return it at
+*any* rank — and it still returns a full `k` results, so nothing about the output
+says a part of the library was skipped. That is a different and much larger risk
+than the one-in-twenty-five above, which assumes a current profile. Re-run
+`dyp route` after every `add` + `embed`; `dyp check` says how many books are
+waiting, and search warns when it is routing around some.
 
 **Do not stack `--expand` and `--rerank`.** Measured, they are substitutes, not
 complements: together they recover the same answers as the better one alone, at
@@ -99,7 +115,9 @@ Occasional, but yours to do when asked. Never do the slow ones unprompted.
 - **Never start a full embed unasked.** It can run for days on a large library.
   A bounded test run on a few books is fine.
 - A model is bound to one chunk size on its first embed and cannot change it.
-- Run `dyp route` afterwards so search can skip most of the library.
+- Run `dyp route` afterwards so search can skip most of the library — **every
+  time**, not just the first. Books embedded since the last run are unreachable
+  under `--route` until you do.
 
 **Several libraries** — `dyp library add NAME DIR`, `dyp library use NAME`, or
 `-L NAME` per command.
@@ -144,8 +162,12 @@ middle-elided titles). Available on `ask` **and on every read-only command** —
 `status`, `check`, `books`, `models`, `library list`, `history`, `asked` — so you
 can drive both searching and administration structurally:
 
-- `dyp status --json` → is it embedded, and how far? (`.models[].coverage`)
+- `dyp status --json` → is it embedded, and how far? (`.models[].coverage`, which
+  is against `.models[].live_chunks` — the chunking that model embeds, not the
+  whole library, so a finished model reads 1.0)
 - `dyp check --json` → anything drifted? (`.drift.clean`, `.models[].outstanding`)
+  and is routing whole? (`.models[].routing.unprofiled_books` — books `--route`
+  cannot reach at all; non-zero means run `dyp route`)
 - `dyp books --json` / `dyp models --json` → what is here, per-book / per-model
 - `dyp library list --json` → the libraries, sizes and defaults
 - `dyp history --json` → embed runs (rate, how each ended) and index operations

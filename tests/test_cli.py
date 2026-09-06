@@ -3,6 +3,7 @@ import pytest
 
 import subprocess
 import sys
+import time
 
 
 def test_help_runs():
@@ -618,6 +619,170 @@ def test_inspection_commands_emit_valid_json(tmp_path, capsys):
     b = books["books"][0]
     assert b["title"] == "b" and b["chunks"] == status["chunks"]
     assert isinstance(b["sources"], list) and b["sources"][0]["present"] is True
+
+
+def _split_two_ways(tmp_path, capsys):
+    """An index chunked twice, with one model finished on the coarse half."""
+    from dyprys import db as _db
+    from dyprys.cli import main
+
+    book = tmp_path / "b.txt"
+    book.write_text("\n\n".join(f"Paragraph {n} about neurons. " * 40 for n in range(60)),
+                    encoding="utf-8")
+    data = str(tmp_path / "ix")
+    assert main(["--data", data, "add", str(book)]) == 0
+    assert main(["--data", data, "add", str(book), "--target", "1200"]) == 0
+    capsys.readouterr()
+
+    conn = _db.connect(tmp_path / "ix")
+    coarse, fine = (r["id"] for r in conn.execute("SELECT id FROM chunkings ORDER BY id"))
+    model = _db.model_id(conn, "coarse-model@aaaaaaaaaaaa", 8)
+    _db.bind_chunking(conn, model, coarse)
+    with conn:
+        for seg in conn.execute(
+            "SELECT id, chunk_count FROM segments WHERE chunking_id = ?", (coarse,)
+        ).fetchall():
+            _db.set_embedded_prefix(conn, model, seg["id"], seg["chunk_count"])
+    mine = conn.execute(
+        "SELECT SUM(chunk_count) FROM segments WHERE chunking_id = ?", (coarse,)
+    ).fetchone()[0]
+    conn.close()
+    return data, mine
+
+
+def test_a_finished_model_reads_as_finished_in_a_split_library(tmp_path, capsys):
+    """`status` and `books` divide a model's progress by its own chunking.
+
+    Over the library total instead, a model that has embedded every chunk it
+    is responsible for reported ~25% and every book as part-way -- which reads
+    as "keep embedding" for work that is already done.
+    """
+    data, mine = _split_two_ways(tmp_path, capsys)
+
+    code, status = _run_capturing(["--data", data, "status", "--json"], capsys)
+    assert code == 0
+    model = status["models"][0]
+    assert model["embedded"] == mine
+    assert model["live_chunks"] == mine, "its own chunking, not the library"
+    assert model["live_chunks"] < status["chunks"], "the fixture must be split two ways"
+    assert model["coverage"] == 1.0
+
+    code, books = _run_capturing(["--data", data, "books", "--json"], capsys)
+    assert code == 0
+    one = books["books"][0]
+    assert one["live_chunks"]["coarse-model@aaaaaaaaaaaa"] == mine
+    assert one["embedded"]["coarse-model@aaaaaaaaaaaa"] == mine
+
+    # and `check`, which was already right, must agree with both
+    code, check = _run_capturing(["--data", data, "check", "--json"], capsys)
+    assert check["models"][0]["coverage"] == 1.0
+
+
+def test_a_finished_model_is_counted_complete_not_part_way(tmp_path, capsys):
+    """The human summary said "0 books complete" for a model with nothing left."""
+    from dyprys.cli import main
+
+    data, _ = _split_two_ways(tmp_path, capsys)
+    assert main(["--data", data, "books"]) == 0
+    out = capsys.readouterr().out
+
+    assert "1 books complete" in out
+    assert "part-way" not in out, out
+
+
+def test_the_next_step_sees_a_model_that_is_not_the_furthest_ahead(tmp_path, capsys):
+    """Asked only of the busiest model, an unfinished second model is invisible.
+
+    A finished model has nothing outstanding, so the hint fell through it and
+    went quiet while another model still had hours of embedding to do.
+    """
+    from dyprys import db as _db
+    from dyprys.cli import next_step
+
+    data, _ = _split_two_ways(tmp_path, capsys)
+    conn = _db.connect(tmp_path / "ix")
+    fine = [r["id"] for r in conn.execute("SELECT id FROM chunkings ORDER BY id")][1]
+    behind = _db.model_id(conn, "fine-model@bbbbbbbbbbbb", 8)
+    _db.bind_chunking(conn, behind, fine)
+    segments = conn.execute(
+        "SELECT id, chunk_count FROM segments WHERE chunking_id = ?", (fine,)
+    ).fetchall()
+    with conn:  # started, deliberately not finished
+        _db.set_embedded_prefix(conn, behind, segments[0]["id"], 1)
+
+    step = next_step(conn)
+    conn.close()
+    assert step is not None, "a model with work outstanding must not be silent"
+    assert "embed" in step
+
+
+def test_the_model_name_an_error_suggests_can_be_pasted_back(tmp_path, capsys):
+    """A middle-elided name is not a name: pasted back it resolves to nothing."""
+    from dyprys import db as _db
+    from dyprys.cli import _handle, _weights_for
+
+    data, _ = _split_two_ways(tmp_path, capsys)
+    conn = _db.connect(tmp_path / "ix")
+    _db.model_id(conn, "second-model@bbbbbbbbbbbb", 8)
+
+    _, problem = _weights_for(conn, None)
+    assert problem and "2 models" in problem
+
+    for row in conn.execute("SELECT name, alias FROM models").fetchall():
+        handle = _handle(row["name"], row["alias"])
+        assert "…" not in handle, f"{handle!r} cannot be typed"
+        assert handle in problem, "the error must offer the handle that works"
+        assert _db.find_model(conn, handle) is not None, f"{handle!r} resolves to nothing"
+    conn.close()
+
+
+def test_watch_waits_out_the_gap_before_an_embed_takes_the_lock(tmp_path):
+    """An embed loads its weights *before* it locks the index.
+
+    For those seconds the index is unlocked while a run is plainly starting,
+    and `dyp watch` in the next terminal lands there nearly every time. It
+    reported "no embedding run in progress" and exited, which reads as the
+    embed having died and invites starting a second one.
+    """
+    import threading
+    import time as _time
+
+    from dyprys.cli import _await_embed
+    from dyprys.lock import exclusive
+
+    directory = tmp_path / "ix"
+    directory.mkdir()
+    assert _await_embed(directory, grace=0) is None, "nothing has started yet"
+
+    running, finish = threading.Event(), threading.Event()
+
+    def starts_late():
+        _time.sleep(0.4)  # stands in for loading the weights
+        with exclusive(directory, "embed"):
+            running.set()
+            finish.wait(5)
+
+    embed = threading.Thread(target=starts_late)
+    embed.start()
+    try:
+        assert _await_embed(directory, grace=5, tick=0.05) is not None, (
+            "watch gave up on a run that was still starting")
+        assert running.is_set()
+    finally:
+        finish.set()
+        embed.join(5)
+
+
+def test_watch_still_gives_up_when_nothing_is_running(tmp_path):
+    """The grace period must not turn a wrong guess into a hang."""
+    from dyprys.cli import _await_embed
+
+    directory = tmp_path / "ix"
+    directory.mkdir()
+
+    began = time.monotonic()
+    assert _await_embed(directory, grace=0.3, tick=0.05) is None
+    assert time.monotonic() - began < 3, "waited far longer than the grace given"
 
 
 def test_models_json_with_no_model_is_empty_and_missing(tmp_path, capsys):

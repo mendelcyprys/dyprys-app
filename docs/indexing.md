@@ -127,5 +127,13 @@ it is stale).
 
 `dyp watch` (from any terminal, or over ssh — reads only) shows the whole job and
 the book in flight, because progress is committed to the database as it goes.
+Progress is measured against the chunking the model is bound to, and with more
+than one model it follows the unfinished one and names it.
+
+An embed loads its weights *before* it locks the index, so for the first seconds
+of a run there is nothing to attach to. `watch` waits `--wait` seconds (default
+15) for a run to appear rather than reporting that none exists; `--wait 0` checks
+once and returns.
+
 `dyp history` afterward records every run with a wall clock *and* a working clock,
 so a run that spanned a laptop sleeping shows the sleep, not an impossible rate.
