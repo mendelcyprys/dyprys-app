@@ -21,8 +21,12 @@ shelf `-c` cuts along cleanly and which it does not, the words this collection
 uses for the thing you are about to call something else, two subjects whose
 vocabulary overlaps enough that a query for one returns the other, a title that
 means two different books. Nobody discovers these from the results — they only
-notice, several bad searches later, that they should have. `dyp library list`
-names them too, per library.
+notice, several bad searches later, that they should have.
+
+**`dyp status` reports only the library it is run against**, so a bare `dyp
+status` speaks for the default library and stays silent about the notes of every
+other one. Run `dyp -L NAME status` for the library you are about to search — or
+read the `notes:` line of `dyp library list`, which names them all at once.
 
 There may not be one. Its absence is not a problem; skipping it when it exists
 is, and if a session teaches you such a fact, offer to add it.
@@ -76,6 +80,15 @@ says a part of the library was skipped. That is a different and much larger risk
 than the one-in-twenty-five above, which assumes a current profile. Re-run
 `dyp route` after every `add` + `embed`; `dyp check` says how many books are
 waiting, and search warns when it is routing around some.
+
+**`--rerank` needs a second model that the index does not remember.** It takes a
+cross-encoder GGUF — not an ollama chat name — via `--reranker PATH` or
+`$DYPRYS_RERANKER`, and bare `--rerank` errors rather than falling back to
+anything. Unlike the expander and summariser, whose defaults are stored in the
+index once used (`dyp history` shows them), **the reranker is not remembered
+between runs**: pass `--reranker` on every `ask`, or set `$DYPRYS_RERANKER` for
+the session. If neither is set and the user has not named a cross-encoder, ask
+where theirs is rather than guessing a path.
 
 **Reach for `--rerank` whenever the rank matters and you can spare the seconds.**
 It rescores results already found, so it cannot recover an answer the search
@@ -148,7 +161,9 @@ Occasional, but yours to do when asked. Never do the slow ones unprompted.
   under `--route` until you do.
 
 **Several libraries** — `dyp library add NAME DIR`, `dyp library use NAME`, or
-`-L NAME` per command.
+`-L NAME` per command. `-L` and `--data` are **global flags and go before the
+command** — `dyp -L NAME ask "…"`, not `dyp ask "…" -L NAME`, which fails with
+`unrecognized arguments`.
 
 **Health & upkeep** — `dyp status` (totals, what to do next), `dyp check` (what
 drifted, what work is outstanding — never changes anything), `dyp books` (what is
