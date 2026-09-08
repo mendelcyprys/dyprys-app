@@ -109,6 +109,21 @@ export function useWarm(library: string | null) {
   });
 }
 
+/**
+ * Totals, and the chunkings the library has been split by.
+ *
+ * The chunkings are why this is a hook and not a one-off: a library split two
+ * ways cannot be embedded without saying which way, so the browser has to know
+ * the sizes before it can offer them.
+ */
+export function useStatus(library: string | null) {
+  return useQuery({
+    queryKey: ["status", library] as const,
+    queryFn: () => api.status(library!),
+    enabled: Boolean(library),
+  });
+}
+
 export function useCheck(library: string | null) {
   return useQuery({
     queryKey: ["check", library] as const,
@@ -157,6 +172,10 @@ export function useJobControls(library: string) {
   const refresh = () => {
     cache.invalidateQueries({ queryKey: ["jobs", library] });
     cache.invalidateQueries({ queryKey: ["check", library] });
+    // An `add` at a new target creates a chunking, and an `embed` binds a model
+    // to one. Both are read straight back by the form that started the run.
+    cache.invalidateQueries({ queryKey: ["status", library] });
+    cache.invalidateQueries({ queryKey: ["models", library] });
     cache.invalidateQueries({ queryKey: keys.libraries });
   };
   return {

@@ -165,6 +165,16 @@ class OptionalModelMissing(DyprysError):
     """
 
 
+class NotAReranker(DyprysError):
+    """A file was named as a reranker and declares itself something else.
+
+    Not `ModelUnavailable`: the file is here and it loads. It is the wrong kind
+    of model, and llama.cpp will not say so -- rank pooling can be forced onto
+    any model, and the result is a number per pair that looks exactly like a
+    score. So this is the only place the difference is ever noticed.
+    """
+
+
 class ModelUnavailable(DyprysError):
     """A model was named and cannot be reached.
 

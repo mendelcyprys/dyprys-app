@@ -56,6 +56,26 @@ that is invisible from a search's output.
 chosen, because a detached subprocess refuses by exiting a second after it
 starts, which over HTTP looks like a job that never ran.
 
+`embed` and `add` are **set up rather than run**: they are the two whose flags
+change what the run is, so neither is one click. `embed` offers `--for`,
+`--duty`, `--limit`, `--batch`, `-c` and the model — the browser sent none of
+these before, so every run it started was unbounded, full duty, whole library,
+which is the wrong default for the one command that can take days. `add` offers
+`--ext`, `--chapters`, `--deep` and the chunk size.
+
+Two controls are **reported rather than offered** once they are settled, since
+both fail as a subprocess that exits a second after it starts. A model bound to
+a chunking cannot be moved to another (a second size needs a second model), and
+a registered model's quantisation is fixed — the form says so and names
+`dyp models --quantise`. A model with no binding yet gets both as real choices,
+which is how a second chunk size is reached from the browser at all: `add` the
+same paths at a new `--target`, then embed that chunking with a second model.
+
+**Light and dark** — three states in the rail: light, dark, or follow the
+system, remembered per browser. An inline script in `index.html` applies the
+stored choice before the first paint; the provider keeps it right afterwards,
+including when the system flips under a page that is already open.
+
 **Asked, and the keyboard** — the rail lists what this library has already been
 asked, from either frontend: a question typed in a terminal shows up there, and
 so does one an agent asked through `--json`. Clicking runs it again. `Cmd-K`

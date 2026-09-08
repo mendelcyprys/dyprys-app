@@ -1162,6 +1162,34 @@ def defaults_payload(conn) -> dict:
     return {"defaults": {role: default_model(conn, role) for role in ROLES}}
 
 
+def check_reranker(path: str) -> None:
+    """Refuse a file that cannot serve as a cross-encoder. Silent when it can.
+
+    Two refusals, and the second is the one that needed writing. A missing file
+    announces itself the moment a search reaches for it; a *wrong* file never
+    does. `llama.cpp` honours `pooling_type=RANK` on any model, so an embedding
+    model loads without complaint and returns one number per pair that looks
+    exactly like a relevance score -- measured on one obvious pair,
+    embeddinggemma-300M ranked an irrelevant passage above the answer and said
+    nothing. So this reads what the GGUF declares about itself.
+
+    Shared by every caller that stores or uses a reranker, because the CLI and
+    the API each having their own copy of this is how the two drift.
+    """
+    from dyprys.rerank import can_rerank
+
+    if not Path(path).exists():
+        raise errors.ModelUnavailable(
+            f"no such file: {path}. A reranker is a cross-encoder .gguf on this "
+            f"machine.", role="reranker")
+    if can_rerank(path) is False:
+        raise errors.NotAReranker(
+            f"{Path(path).name} declares itself an embedding model, not a "
+            f"cross-encoder. Used for reranking it returns numbers that are not "
+            f"relevance, and ranks silently and plausibly wrong.",
+            role="reranker")
+
+
 def remember_model(conn, role: str, value, *, known=None) -> dict:
     """Store a default optional model for this library, or forget one.
 
@@ -1183,12 +1211,7 @@ def remember_model(conn, role: str, value, *, known=None) -> dict:
         return defaults_payload(conn)
 
     if role == "reranker":
-        # A path, not a name: a cross-encoder is a file on this machine, and one
-        # that is not there now will not be there when a search needs it.
-        if not Path(wanted).exists():
-            raise errors.ModelUnavailable(
-                f"no such file: {wanted}. A reranker is a cross-encoder .gguf "
-                f"on this machine.", role=role)
+        check_reranker(wanted)
     elif known is not None and wanted not in known and f"{wanted}:latest" not in known:
         raise errors.ModelUnavailable(
             f"nothing installed is named {wanted!r}", choices=list(known), role=role)
@@ -1197,6 +1220,26 @@ def remember_model(conn, role: str, value, *, known=None) -> dict:
         db.set_meta(conn, f"model.{role}", wanted)
     db.record_event(conn, "default", f"{role} = {wanted}")
     return defaults_payload(conn)
+
+
+# One metadata read per file, kept across requests. Opening a picker should not
+# re-read the same six files every time, and the key carries the size so a file
+# replaced in place is read again rather than remembered wrongly.
+_DESCRIBED: dict[tuple[str, int], dict] = {}
+
+
+def _describes(path: str, size: int) -> dict:
+    """`{architecture, rerank}` for one file. Imported lazily like every other
+    use of `rerank` here, so listing models does not pull in llama_cpp until
+    something actually reads a file."""
+    key = (path, size)
+    if key not in _DESCRIBED:
+        from dyprys.rerank import can_rerank, declares
+
+        said = declares(path)
+        _DESCRIBED[key] = {"architecture": said.get("architecture"),
+                           "rerank": can_rerank(path)}
+    return _DESCRIBED[key]
 
 
 def available_models(directories) -> dict:
@@ -1211,10 +1254,17 @@ def available_models(directories) -> dict:
     `--rerank` is an error rather than a downgrade. "Type an absolute path each
     time" is not a design in a browser, so something has to list what is there.
 
-    Nothing here guesses what a file *is*. A cross-encoder and a chat model are
-    both a .gguf, and the difference is not in the name; reporting a guess as a
-    fact would be worse than reporting nothing, because a chat model used as a
-    reranker rescores silently and plausibly.
+    Nothing here guesses what a file *is*, but it does report what the file
+    says. `rerank` is read from the GGUF's own `pooling_type`: a cross-encoder
+    declares RANK where an embedding model declares MEAN or CLS, and that is a
+    fact from the file rather than an inference from its name — which is worth
+    the distinction, because `embeddinggemma-300M-Q8_0.gguf` and
+    `qwen3-reranker-0.6b-q8_0.gguf` are the same shape and one of them, used as
+    a reranker, ranks silently and plausibly wrong.
+
+    `rerank` is **null when the file did not say**, and a caller must not read
+    that as "no": a `.gguf` converted before the key existed would otherwise be
+    locked out of a job it can do.
     """
     seen: dict[str, dict] = {}
     for directory in directories:
@@ -1229,10 +1279,15 @@ def available_models(directories) -> dict:
                     size = found.stat().st_size
                 except OSError:
                     continue
-                seen.setdefault(str(found), {
+                if str(found) in seen:
+                    continue
+                said = _describes(str(found), size)
+                seen[str(found)] = {
                     "path": str(found), "name": found.name, "bytes": size,
                     "directory": str(found.parent),
-                })
+                    "architecture": said["architecture"],
+                    "rerank": said["rerank"],
+                }
     return {"models": sorted(seen.values(), key=lambda row: row["name"].lower()),
             "searched": [str(Path(d).expanduser()) for d in directories]}
 
@@ -1289,6 +1344,10 @@ def models_payload(conn, directory) -> dict:
                         "stale_books": m.stale_books},
             "file_path": m.file_path,
             "file_present": bool(m.file_path) and Path(m.file_path).exists(),
+            # Null until this model has embedded something. A frontend that
+            # offers a chunk size needs it: bound, the choice is already
+            # made and cannot be changed; unbound, it is a real choice.
+            "chunking_id": m.chunking_id,
         }
         for m in inspect(conn, directory)]}
 

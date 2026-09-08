@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ModelChoice } from "@/components/model-choice";
+import type { WeightsFile } from "@/lib/api";
 import { useAvailableModels, useDefaults, useOllama, useRemember } from "@/lib/queries";
 import { useSearchSettings, type Effort } from "@/lib/settings";
 import { bytes, cn } from "@/lib/utils";
@@ -266,11 +267,19 @@ function Weights({
   onChoose: (path: string | null) => void;
   onRemember: (path: string | null) => void;
   busy: boolean;
-  files?: { path: string; name: string; bytes: number }[];
+  files?: WeightsFile[];
   searched?: string[];
   loading: boolean;
 }) {
   if (loading) return <p className="text-xs text-muted-foreground">Looking…</p>;
+
+  // Only the files that can actually do this job, plus the ones that did not
+  // say. `rerank === false` is the file's own `pooling_type` declaring it an
+  // embedding model: llama.cpp will load it as a reranker without complaint and
+  // return numbers that are not relevance, so offering it would be offering a
+  // silently wrong ranking.
+  const usable = (files ?? []).filter((file) => file.rerank !== false);
+  const hidden = (files ?? []).length - usable.length;
 
   if (!files?.length) {
     // An empty list is only readable next to where it looked — otherwise it
@@ -289,9 +298,32 @@ function Weights({
     );
   }
 
+  if (!usable.length) {
+    return (
+      <div className="space-y-2 rounded-md border border-dashed p-3">
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <FileQuestion className="size-3.5" /> None of the {files.length}{" "}
+          <code className="font-mono">.gguf</code> files found is a cross-encoder.
+        </p>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Each one declares itself an embedding model. Reranking needs a cross-encoder — one that
+          scores a (query, passage) pair rather than embedding a single text. bge-reranker,
+          jina-reranker and Qwen3-Reranker are the usual ones.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1">
-      {files.map((file) => (
+      {hidden > 0 && (
+        <p className="pb-1 text-[10px] text-muted-foreground">
+          {hidden} other <code className="font-mono">.gguf</code>{" "}
+          {hidden === 1 ? "file declares" : "files declare"} themselves embedding models, and are
+          not shown — used as a reranker they score plausibly and rank wrongly.
+        </p>
+      )}
+      {usable.map((file) => (
         <div
           key={file.path}
           className={cn(
@@ -310,6 +342,13 @@ function Weights({
             {file.path === remembered && (
               <Badge variant="outline" className="shrink-0">
                 library default
+              </Badge>
+            )}
+            {file.rerank === null && (
+              // Shown, not hidden: the file said nothing about itself, and
+              // "we could not tell" is a different answer from "yes".
+              <Badge variant="outline" className="shrink-0">
+                unverified
               </Badge>
             )}
             <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">

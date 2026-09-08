@@ -211,3 +211,71 @@ def test_rescoring_stops_when_nobody_is_waiting():
     assert reranker._llm.scored == 2, (
         f"scored {reranker._llm.scored} passages after being abandoned at 2 -- "
         f"the check must sit inside the per-passage loop, not around it")
+
+
+def test_a_model_that_is_not_a_cross_encoder_is_refused(monkeypatch, tmp_path):
+    """The refusal that exists because the alternative is a silent wrong answer.
+
+    `llama.cpp` honours `pooling_type=RANK` on *any* model, so an embedding
+    model loads as a reranker without complaint and returns one number per pair
+    that looks exactly like a relevance score. Measured on one obvious pair --
+    an on-topic passage against a passage about bananas -- embeddinggemma-300M
+    put the bananas first (-27.4 against -35.8) and raised nothing.
+
+    So the check is on what the file *declares*: `pooling_type` is written into
+    the GGUF at conversion, and a cross-encoder says RANK (4) where an embedding
+    model says MEAN (1) or CLS (2). That is a fact from the file, not the
+    filename guess this module deliberately refuses to make elsewhere.
+    """
+    from dyprys import errors, rerank as rerank_mod
+
+    weights = tmp_path / "embedder.gguf"
+    weights.write_bytes(b"not really a gguf")
+    monkeypatch.setattr(rerank_mod, "declares",
+                        lambda path: {"architecture": "bert", "pooling_type": 1})
+
+    with pytest.raises(errors.NotAReranker) as refused:
+        rerank_mod.Reranker(weights)
+
+    assert "cross-encoder" in refused.value.message
+    assert refused.value.role == "reranker", (
+        "a frontend offers a picker off `role`; without it this is just a string")
+
+
+def test_a_file_that_says_nothing_about_itself_is_allowed(monkeypatch, tmp_path):
+    """Unknown is not no.
+
+    A `.gguf` converted before the key existed, or one this machine cannot open
+    to read metadata, declares nothing -- and refusing on that would lock
+    someone out of a reranker that works. The load below fails for its own
+    reasons; what matters is that it is not `NotAReranker`.
+    """
+    from dyprys import errors, rerank as rerank_mod
+
+    weights = tmp_path / "quiet.gguf"
+    weights.write_bytes(b"not really a gguf")
+    monkeypatch.setattr(rerank_mod, "declares", lambda path: {})
+
+    with pytest.raises(Exception) as raised:
+        rerank_mod.Reranker(weights)
+
+    assert not isinstance(raised.value, errors.NotAReranker)
+
+
+def test_the_template_falls_back_to_the_declared_architecture(tmp_path):
+    """A BERT cross-encoder handed the Qwen3 chat template ranks worse than not
+    reranking at all -- measured, and recorded above `TEMPLATES`.
+
+    The filename decides when it names a family, because that is what the
+    measurement was taken against. When it does not, the architecture the file
+    declares is a far better answer than falling straight through to `qwen3`.
+    """
+    from dyprys.rerank import template_for
+
+    assert template_for(tmp_path / "bge-reranker-v2.gguf") == "bge"
+    assert template_for(tmp_path / "jina-reranker-v2.gguf") == "bge"
+    # Says nothing recognisable, and the file says "bert".
+    assert template_for(tmp_path / "cross-encoder-q8.gguf", "bert") == "bge"
+    assert template_for(tmp_path / "cross-encoder-q8.gguf", "jina-bert-v2") == "bge"
+    assert template_for(tmp_path / "cross-encoder-q8.gguf", "qwen3") == "qwen3"
+    assert template_for(tmp_path / "cross-encoder-q8.gguf") == "qwen3"

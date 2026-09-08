@@ -64,6 +64,7 @@ is withheld, never shown stale.
 | `ollama has no model named 'X'` | `ollama pull X`, or use an installed one |
 | `cannot reach ollama at http://localhost:11434` | `ollama serve`, or pass a `.gguf` path to `--expander` |
 | reranking rejects a chat model | it needs a **cross-encoder** `.gguf`, not a chat model |
+| `not_a_reranker`: "declares itself an embedding model" | the `.gguf` is real and loads, but it embeds rather than scores pairs. Its own `pooling_type` says so. Use a cross-encoder — bge-reranker, jina-reranker, Qwen3-Reranker |
 
 `--summarise` answering "no answer in these passages" is a search-failure signal,
 not a library-lacks-it verdict: re-search with different words. A refusal that

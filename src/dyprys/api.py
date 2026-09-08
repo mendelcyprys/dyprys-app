@@ -391,6 +391,13 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
                            for m in known["models"] if m["file_path"]]
             configured = os.environ.get("DYPRYS_MODEL_DIR", "")
             directories += [part for part in configured.split(os.pathsep) if part]
+            # The directory a named model lives in, for a library that has no
+            # models of its own yet. Without this the first embed of a new
+            # library lists nothing, which is exactly when a picker is needed.
+            for named in ("DYPRYS_MODEL", "DYPRYS_RERANKER"):
+                where = os.environ.get(named, "")
+                if where:
+                    directories.append(str(Path(where).expanduser().parent))
             directories.append(str(Path.home() / ".cache" / "qmd" / "models"))
             return service.available_models(dict.fromkeys(directories))
 
