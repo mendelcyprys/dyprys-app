@@ -6,6 +6,7 @@ import { NotesDialog, NotesNudge } from "@/rail/notes";
 import type { LibraryRow } from "@/lib/api";
 import { ModelCoverage } from "@/components/coverage";
 import { Books } from "./books";
+import { Ask } from "./ask";
 import { Models } from "./models";
 
 export const TABS = ["Ask", "Books", "Models", "Jobs"] as const;
@@ -45,7 +46,9 @@ export function Workspace({
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         {library.notes && <NotesNudge library={library.name} onRead={() => setNotesOpen(true)} />}
 
-        {tab === "Models" ? (
+        {tab === "Ask" ? (
+          <Ask key={library.name} library={library.name} />
+        ) : tab === "Models" ? (
           <Models library={library.name} />
         ) : tab === "Books" ? (
           // Keyed, so switching library resets the filter box with the

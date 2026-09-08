@@ -112,6 +112,21 @@ The response is `dyp ask --json`'s payload — `query`, `mode`, `routed`,
 fields the CLI prints rather than serialises: `warnings`, `answer`, `expansion`,
 `models`.
 
+`answer` carries three fields beyond the prose and its checked quotations, and
+each says something a reader cannot otherwise recover:
+
+- **`refused`** — the rephrasing that *also* found nothing. `--summarise` says
+  "these passages do not answer the question" and retries once with the model's
+  own words before giving up. A refusal that survived that is strong evidence
+  the library lacks the answer; one that was never rephrased is not, and stored
+  prose reading `NO ANSWER IN PASSAGES` looks identical either way.
+- **`retried`** — the rephrasing that worked.
+- **`drawn_from`** — present only after a successful retry, and then it matters
+  a great deal: the answer is about the *retry's* passages while `results` still
+  holds the original search, and `verified[].cited` indexes into these. Without
+  it a reader is shown an answer citing passages that are not on the screen,
+  with citations that look correct.
+
 Read `results` the way `docs/searching.md` says to read the terminal output.
 Three of those rules matter more over HTTP, because a browser hides what a
 terminal shows:

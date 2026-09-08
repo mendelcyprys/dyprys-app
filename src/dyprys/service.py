@@ -359,14 +359,35 @@ class Summary:
     failed: str | None = None
 
     def as_record(self) -> dict:
-        """The shape `dyp asked` stores, so a good answer can be found again."""
-        return {
+        """The shape `dyp asked` stores, so a good answer can be found again.
+
+        `retried` and `refused` are the two things the terminal prints and a
+        record without them cannot say. A refusal that survived a rephrasing is
+        strong evidence the library lacks the answer; one that was never
+        rephrased is not, and stored prose reading "NO ANSWER IN PASSAGES" looks
+        identical either way.
+
+        `drawn_from` appears only after a successful retry, and then it matters
+        a great deal: the answer is about the *retry's* passages, not the ones
+        the search returned, and `cited` indexes into these. Without it a reader
+        is shown an answer citing passages that are not on the screen. Omitted
+        otherwise because it would only repeat the results beside it.
+        """
+        record = {
             "prose": self.answer.prose.strip(),
             "verified": [{"cited": c.cited, "quote": c.quote, "where": c.location}
                          for c in self.answer.verified],
             "rejected": [{"cited": c.cited, "quote": c.quote}
                          for c in self.answer.rejected],
+            "retried": self.retried,
+            "refused": self.failed,
         }
+        if self.retried:
+            record["drawn_from"] = [
+                {"chunk_id": p.chunk_id, "book": p.title, "path": str(p.path),
+                 "offset": p.offset}
+                for p in self.passages]
+        return record
 
 
 # --------------------------------------------------------------------------

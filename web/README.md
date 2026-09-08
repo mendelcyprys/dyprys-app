@@ -21,13 +21,25 @@ dyp serve --web web/dist
 
 ## What is here
 
-**Phase 1 — libraries.** The rail's picker (books, per-model coverage, an
-index that is registered but not mounted, which one is the default), naming and
-forgetting a library, and `NOTES.md` rendered — with a one-line nudge on the
-first search of a session, because notes only help when read *before*
-searching.
+**Libraries** — the rail's picker (books, per-model coverage, an index that is
+registered but not mounted, which one is the default), naming and forgetting a
+library, and `NOTES.md` rendered, with a one-line nudge on the first search of a
+session because notes only help when read *before* searching.
 
-Books, models, ask and jobs are phases 2 to 5 and are stubs.
+**Books** — virtualised (3,453 in `neuro`), filtered on the server through the
+same matcher `-c` uses, per-model coverage, missing source files called out.
+Checkboxes feed the rail's scope, and a selected book contributes its **path**:
+titles collide, and sefaria holds two books called `Arakhin`.
+
+**Models** — a picker that is required on a multi-model index and warms on
+selection, `model_ambiguous` rendered as the picker that resolves it, weights
+that have gone missing said before the question rather than as a 503 during it,
+and a settings sheet holding the reranker per library.
+
+**Ask and the reader** — the streamed search, the drafted answer with its quotes
+checked, and `GET /source` as a window around a passage.
+
+Jobs is phase 5 and is a stub.
 
 ## The rules this client is built to keep
 

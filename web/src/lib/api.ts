@@ -132,6 +132,87 @@ export interface WeightsFile {
   directory: string;
 }
 
+export interface Result {
+  rank: number;
+  chunk_id: number;
+  book: string;
+  chapter: number | null;
+  /** The path. The only thing that says *which* book. Cite from this. */
+  path: string;
+  offset: number;
+  /** Comparable only inside this response. Show it; never sort on it. */
+  cos: number | null;
+  /** How it was found: "vec 1 · phrase 1". More than one score could carry. */
+  provenance: string | null;
+  state: string;
+  /** null when the passage could not be proved. Never render it as a quote. */
+  text: string | null;
+}
+
+export interface Claim {
+  cited: number;
+  quote: string;
+  where?: string;
+}
+
+export interface Answer {
+  prose: string;
+  verified: Claim[];
+  rejected: Claim[];
+  /** The rephrasing that worked — the answer is about `drawn_from`, not results. */
+  retried: string | null;
+  /** The rephrasing that also found nothing. A refusal that survived one. */
+  refused: string | null;
+  drawn_from?: { chunk_id: number; book: string; path: string; offset: number }[];
+}
+
+export interface Warning {
+  kind: string;
+  message: string;
+}
+
+export interface Answered {
+  query: string;
+  mode: string;
+  routed: boolean;
+  scanned_fraction: number;
+  elapsed_ms: number;
+  results: Result[];
+  /** Always present, empty when there is nothing to say. Always render it. */
+  warnings: Warning[];
+  answer: Answer | null;
+  expansion: unknown;
+  models: Record<string, string>;
+}
+
+export interface Stage {
+  kind: string;
+  label: string;
+  detail: string;
+  indent: number;
+}
+
+export interface SearchBody {
+  question: string;
+  k?: number;
+  model?: string | null;
+  collection?: string[] | string | null;
+  route?: number;
+  rerank?: number;
+  reranker?: string | null;
+  expand?: boolean | string | null;
+  expander?: string | null;
+  summarise?: boolean | string | null;
+  summariser?: string | null;
+  full?: boolean;
+}
+
+export interface SourceWindow {
+  path: string;
+  offset: number;
+  text: string;
+}
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -180,8 +261,100 @@ export const api = {
   warm: (name: string, model?: string) =>
     post<unknown>(`/libraries/${encodeURIComponent(name)}/warm`, model ? { model } : {}),
 
+  /** Bytes around an offset, snapped to sentences, for a path this index owns. */
+  source: (name: string, path: string, offset: number, span: number) =>
+    request<SourceWindow>(
+      `/libraries/${encodeURIComponent(name)}/source?path=${encodeURIComponent(path)}` +
+        `&offset=${offset}&span=${span}`,
+    ),
+
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
 
   check: (name: string, deep = false) =>
     request<unknown>(`/libraries/${encodeURIComponent(name)}/check?deep=${deep}`),
 };
+
+/**
+ * A search, as it happens.
+ *
+ * NDJSON: any number of `{stage}` frames, then exactly one `{result}` or
+ * `{error}` frame. A ten-second routed search with no output is
+ * indistinguishable from a hang, which is what the stages are for.
+ *
+ * The last frame is always one or the other — a stream that simply stops is a
+ * bug, not an empty result — so ending without one is raised rather than
+ * quietly returning nothing.
+ */
+export async function askStream(
+  library: string,
+  body: SearchBody,
+  onStage: (stage: Stage) => void,
+  signal?: AbortSignal,
+): Promise<Answered> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/libraries/${encodeURIComponent(library)}/ask/stream`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (failure) {
+    if ((failure as Error).name === "AbortError") throw failure;
+    throw new DyprysError("unreachable", "the dyprys server is not answering", 0);
+  }
+
+  // A refusal before the headers is still a status code — an empty query, an
+  // unmatched scope, a model this machine does not have.
+  if (!response.ok || !response.body) {
+    const failed = await response.json().catch(() => ({}));
+    throw new DyprysError(
+      failed.error ?? "error",
+      failed.detail ?? response.statusText,
+      response.status,
+      failed.choices ?? [],
+      failed.role ?? null,
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const handle = (line: string): Answered | undefined => {
+    const frame = JSON.parse(line);
+    if (frame.stage) {
+      onStage(frame.stage as Stage);
+      return undefined;
+    }
+    if (frame.error) {
+      // After the headers a failure cannot be a status code, so it arrives here.
+      throw new DyprysError(
+        frame.error,
+        frame.detail ?? "",
+        500,
+        frame.choices ?? [],
+        frame.role ?? null,
+      );
+    }
+    return frame.result as Answered;
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const result = handle(line);
+      if (result) return result;
+    }
+  }
+  if (buffer.trim()) {
+    const result = handle(buffer);
+    if (result) return result;
+  }
+  throw new DyprysError("truncated", "the search stopped without an answer", 0);
+}

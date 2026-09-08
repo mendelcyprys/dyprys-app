@@ -177,7 +177,7 @@ Measured, they are substitutes, and together they cost the sum for the gain of
 the better one. Make them a segmented control — *fast · expand · rerank* — not
 two checkboxes.
 
-## Phase 4 — Ask, and the reader
+## Phase 4 — Ask, and the reader  ✅ built
 
 Only now the search itself, and it should use **`POST /ask/stream`** from the
 start rather than being retrofitted. A ten-second routed search with no output is

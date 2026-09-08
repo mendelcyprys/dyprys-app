@@ -578,3 +578,62 @@ def test_naming_a_model_that_is_not_here_says_what_is(client):
 
     assert missing.status_code == 400
     assert missing.json()["choices"] == ["stub"]
+
+
+def test_a_summariser_refusal_arrives_as_an_answer_not_an_absence(client, monkeypatch):
+    """The surest evidence a library lacks something, and it must survive HTTP.
+
+    `dyp ask --summarise` says "these passages do not answer the question"
+    outright, and retries once with the model's own rephrasing before giving up.
+    A refusal that survived the rephrasing means something; one that was never
+    rephrased does not — and stored prose reading NO ANSWER IN PASSAGES looks
+    identical either way, so `refused` carries the words that were tried.
+    """
+    from dyprys import summarise as summarise_mod
+    from dyprys.summarise import NO_ANSWER
+
+    said = []
+
+    def talk(model, prompt, *a, **k):
+        said.append(prompt)
+        return "other words entirely" if len(said) == 2 else NO_ANSWER
+
+    monkeypatch.setattr(summarise_mod, "ask_ollama", talk)
+
+    answered = ask(client, summarise="stub-summariser").json()
+
+    assert answered["answer"]["prose"] == NO_ANSWER
+    assert answered["answer"]["refused"] == "other words entirely", (
+        "a browser cannot tell a rephrased refusal from an unrephrased one")
+    assert answered["answer"].get("drawn_from") is None, (
+        "the retry found nothing, so the answer is about the passages on screen")
+
+
+def test_a_successful_retry_says_which_passages_it_is_about(client, monkeypatch):
+    """The asymmetry the API used to drop entirely.
+
+    When the retry works, the answer is drawn from the *retry's* passages while
+    `results` still holds the original search — and `cited` indexes into the
+    former. Without `drawn_from`, a reader is shown an answer citing passages
+    that are not on the screen, with citations that look correct.
+    """
+    from dyprys import summarise as summarise_mod
+    from dyprys.summarise import NO_ANSWER
+
+    said = []
+
+    def talk(model, prompt, *a, **k):
+        said.append(prompt)
+        if len(said) == 1:
+            return NO_ANSWER
+        if len(said) == 2:
+            return "neurons and synapses"
+        return "They are connected."
+
+    monkeypatch.setattr(summarise_mod, "ask_ollama", talk)
+
+    answered = ask(client, summarise="stub-summariser").json()
+
+    assert answered["answer"]["retried"] == "neurons and synapses"
+    drawn = answered["answer"]["drawn_from"]
+    assert drawn and all({"chunk_id", "book", "path", "offset"} <= set(row) for row in drawn)
