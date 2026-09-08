@@ -141,6 +141,29 @@ def test_scoping_reports_the_fraction_of_corpus_scanned(conn, searchable, librar
     assert scanned_fraction(conn, model, scope_books(conn, "book")) == 1.0
 
 
+def test_a_named_book_can_be_scoped_to_by_that_name(conn, searchable):
+    """A name you can see but not say would be a name in name only.
+
+    `label` is a display name someone chose, kept beside the title ingest
+    derived rather than over it. The point of calling a book something is to be
+    able to ask a question of it by that name, so the matcher takes the label
+    alongside the title and the key -- and the key stays identity either way,
+    because a label is no more unique than a title.
+    """
+    from dyprys.search import scope
+
+    with conn:
+        conn.execute("UPDATE books SET label = ? WHERE title = ?", ("Bartleby", "book0"))
+
+    matched, missed = scope(conn, "bartleby")
+    named = conn.execute("SELECT id FROM books WHERE title = 'book0'").fetchone()["id"]
+
+    assert missed == [], "the label matched, so nothing was missed"
+    assert matched == {named}
+    # And the derived title still matches, because it was not overwritten.
+    assert scope(conn, "book0")[0] == {named}
+
+
 def test_scoping_to_nothing_finds_nothing_rather_than_everything(conn, searchable):
     """A pattern that matches no book must not silently widen to the library."""
     model, store, _ = searchable

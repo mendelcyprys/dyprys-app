@@ -30,6 +30,27 @@ const DEFAULT_TARGET = 3600;
 const DEFAULT_OVERLAP = 0;
 const DEFAULT_BATCH = 8;
 
+/**
+ * Chunk sizes worth starting from. The field stays free — this is a byte count
+ * and any of them is legal — but a blank numeric box is a bad way to ask for a
+ * decision nobody can make without knowing what the number does.
+ *
+ * The scale is what matters, not the exact figure: English prose runs about
+ * four bytes to the token, so these are roughly 300, 900 and 2,000 tokens. A
+ * smaller chunk makes a passage that is precisely the answer and often too
+ * short to stand on its own; a larger one carries its context but dilutes the
+ * embedding, since one vector has to stand for everything in it.
+ */
+const SIZES = [
+  { target: 1200, label: "Tight", what: "~300 tokens · precise, often needs its neighbours" },
+  {
+    target: DEFAULT_TARGET,
+    label: "Default",
+    what: "~900 tokens · a long paragraph or a short section",
+  },
+  { target: 8000, label: "Wide", what: "~2,000 tokens · carries context, dilutes the vector" },
+];
+
 function Field({
   label,
   hint,
@@ -176,14 +197,36 @@ export function AddOptions({
         </Field>
         <Field
           label="Chunk size (bytes)"
-          hint={`default ${DEFAULT_TARGET.toLocaleString()} — about 900 tokens of English prose`}
+          className="col-span-2"
+          hint={
+            SIZES.find((s) => s.target === size)?.what ??
+            "any byte count is legal — the presets are starting points, not limits"
+          }
         >
-          <Input
-            value={target}
-            onChange={(event) => setTarget(event.target.value)}
-            inputMode="numeric"
-            className="h-9 text-xs tabular-nums"
-          />
+          <div className="flex gap-2">
+            {SIZES.map((preset) => (
+              <Button
+                key={preset.target}
+                type="button"
+                size="sm"
+                variant={preset.target === size ? "secondary" : "outline"}
+                className="h-9 flex-1 flex-col gap-0 py-1"
+                onClick={() => setTarget(String(preset.target))}
+              >
+                <span className="text-[11px] font-medium">{preset.label}</span>
+                <span className="text-[9px] font-normal opacity-70">
+                  {preset.target.toLocaleString()} B
+                </span>
+              </Button>
+            ))}
+            <Input
+              value={target}
+              onChange={(event) => setTarget(event.target.value)}
+              inputMode="numeric"
+              aria-label="Chunk size in bytes"
+              className={cn("h-9 w-24 text-xs tabular-nums", !valid && "border-destructive")}
+            />
+          </div>
         </Field>
         <Field
           label="Overlap (bytes)"
@@ -305,6 +348,15 @@ export function EmbedOptions({
   }, [selected, touched]);
 
   const chunkings = status?.chunkings ?? [];
+  // A cross-encoder is not an embedding model. It declares `pooling_type` RANK,
+  // which means it scores a (query, passage) pair rather than producing a
+  // vector -- so embedding a library with one builds a store of numbers that no
+  // search can use, over hours or days. Hidden rather than badged: unlike the
+  // reranker picker, where the wrong choice is one search, the wrong choice
+  // here is the whole index.
+  const embedders = weights.filter(
+    (file) => file.rerank !== true && !models.some((row) => row.file_path === file.path),
+  );
   const registered = typing ? undefined : models.find((row) => row.name === model);
   const bound = registered?.chunking_id ?? null;
   const boundTo = chunkings.find((c) => c.id === bound);
@@ -374,15 +426,13 @@ export function EmbedOptions({
                 ))}
               </optgroup>
             )}
-            {weights.length > 0 && (
+            {embedders.length > 0 && (
               <optgroup label="On this machine, not in this index">
-                {weights
-                  .filter((file) => !models.some((row) => row.file_path === file.path))
-                  .map((file) => (
-                    <option key={file.path} value={file.path}>
-                      {file.name} — {bytes(file.bytes)}
-                    </option>
-                  ))}
+                {embedders.map((file) => (
+                  <option key={file.path} value={file.path}>
+                    {file.name} — {bytes(file.bytes)}
+                  </option>
+                ))}
               </optgroup>
             )}
             <option value={"\u0000typed"}>Somewhere else — type a path…</option>

@@ -452,3 +452,30 @@ A library grows a second chunking through `add`, not through `embed`: re-running
 as the same bytes under a chunking they have not been split by before. The book
 is reported as `rechunked`, the existing chunking is untouched, and no vector is
 lost.
+
+
+## Naming a book, and noting what it is
+
+`POST /books/describe` takes `{key, label?, note?}`. The key travels in the body
+rather than the path: a key is a filesystem path, and a path segment that has to
+survive slashes, spaces and a percent sign is a decoding argument nobody wins.
+
+Each field is applied only when **present**, so a form that edits one does not
+clear the other; `null` or `""` removes one. `GET /books` returns both, and
+`label` and `note` are null until someone sets them.
+
+`label` is not a rename and not identity:
+
+  * The **file** keeps `title`, which ingest derives from the filename and
+    rewrites whenever the file moves — a name stored there would silently revert
+    the next time the book was relocated, which is why the two are separate
+    columns rather than one.
+  * The **key** is still the only thing that says *which* book. Titles collide;
+    so do labels. `sefaria` holds two different works called Arakhin, and that is
+    the case this feature exists for.
+  * `-c` matches the label alongside the title and the key, because a name you
+    can see but not say would be a name in name only.
+
+`note` rides back on every search result as `book_note`. The library's
+`NOTES.md` answers "what is this corpus"; this answers "what is this book", and
+the passage on the screen is where that question actually arises.

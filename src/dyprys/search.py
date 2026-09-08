@@ -40,6 +40,10 @@ class Passage:
 
     chunk_id: int
     score: float
+    # What to call the book here: the name someone chose if they chose one, and
+    # otherwise the one ingest derived from the filename. Display only -- `path`
+    # is still the only thing that says *which* book, because titles collide and
+    # a label is no more unique than a title.
     title: str
     path: str
     chapter: int
@@ -49,14 +53,25 @@ class Passage:
     # recorded -- see `text.locate_span`. Carried so a citation can name a byte
     # in a file rather than only a chunk id.
     offset: int = 0
+    # What someone wrote down about this book, when they wrote anything. Carried
+    # on the result rather than looked up separately, because the moment it is
+    # worth knowing -- which edition this is, why the sentences run together --
+    # is the moment a passage from that book is on the screen.
+    note: str | None = None
 
 
-def _matches(pattern: str, title: str, key: str) -> bool:
-    """One pattern against one book, by glob or substring, case-insensitively."""
+def _matches(pattern: str, *names: str) -> bool:
+    """One pattern against one book's names, by glob or substring, folded.
+
+    The names are its title, its key, and the label someone gave it if they gave
+    it one. A label that could be seen but not scoped by would be a name in name
+    only -- the point of calling a book something is to be able to say it.
+    """
     needle = pattern.lower()
+    here = [name for name in names if name]
     if any(c in pattern for c in "*?["):
-        return fnmatch.fnmatch(title, needle) or fnmatch.fnmatch(key, needle)
-    return needle in title or needle in key
+        return any(fnmatch.fnmatch(name, needle) for name in here)
+    return any(needle in name for name in here)
 
 
 def scope(conn: sqlite3.Connection,
@@ -77,10 +92,11 @@ def scope(conn: sqlite3.Connection,
     wanted = [patterns] if isinstance(patterns, str) else list(patterns)
     matched: set[int] = set()
     hit = {pattern: False for pattern in wanted}
-    for row in conn.execute("SELECT id, title, key FROM books"):
-        title, key = row["title"].lower(), row["key"].lower()
+    for row in conn.execute("SELECT id, title, key, label FROM books"):
+        names = (row["title"].lower(), row["key"].lower(),
+                 (row["label"] or "").lower())
         for pattern in wanted:
-            if _matches(pattern, title, key):
+            if _matches(pattern, *names):
                 matched.add(row["id"])
                 hit[pattern] = True
     return matched, [pattern for pattern in wanted if not hit[pattern]]
@@ -238,12 +254,13 @@ def resolve(conn: sqlite3.Connection, hits: list[Hit]) -> list[Passage]:
             Passage(
                 chunk_id=hit.chunk_id,
                 score=hit.score,
-                title=located["title"],
+                title=located["label"] or located["title"],
                 path=located["path"],
                 chapter=located["source_ordinal"],
                 text=span.text,
                 state=span.state,
                 offset=span.offset,
+                note=located["note"],
             )
         )
     return passages

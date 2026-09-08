@@ -25,3 +25,14 @@ export function percent(fraction: number): string {
 export function basename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
+
+/**
+ * "1 book", "3 books". Enough English for the counts this app shows.
+ *
+ * Here rather than at each call site because "1 books" appeared in four places
+ * independently, and it will appear in a fifth the next time someone writes a
+ * count by hand.
+ */
+export function count(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}

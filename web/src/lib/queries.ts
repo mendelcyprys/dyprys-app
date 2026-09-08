@@ -65,6 +65,32 @@ export function useBooks(library: string | null, pattern: string, enabled = true
   });
 }
 
+/**
+ * Name a book, or note something about it.
+ *
+ * Invalidates books *and* asked: a label changes what a past search's results
+ * are called, and a list still showing the filename next to the new name reads
+ * as two different books.
+ */
+export function useDescribeBook(library: string) {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      key,
+      label,
+      note,
+    }: {
+      key: string;
+      label?: string | null;
+      note?: string | null;
+    }) => api.describeBook(library, key, { label, note }),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ["books", library] });
+      cache.invalidateQueries({ queryKey: ["asked", library] });
+    },
+  });
+}
+
 export function useModels(library: string | null) {
   return useQuery({
     queryKey: ["models", library] as const,

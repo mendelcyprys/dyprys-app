@@ -252,6 +252,14 @@ def build_parser() -> argparse.ArgumentParser:
     bk = sub.add_parser("books", help="list books, or show one in detail")
     bk.add_argument("pattern", nargs="?", help="show matching books in full")
     bk.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
+    bk.add_argument("--label", metavar="NAME",
+                    help="call this book NAME here — a display name, and one -c "
+                         "can match. 'none' removes it. The pattern must match "
+                         "exactly one book. The file is not renamed.")
+    bk.add_argument("--note", metavar="TEXT",
+                    help="what is worth remembering about this book: which "
+                         "edition, why it is here, what its vocabulary is. "
+                         "Shown wherever the book is. 'none' removes it.")
 
     md = sub.add_parser("models", help="embedding models: coverage and disk")
     md.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
@@ -469,6 +477,8 @@ def _dispatch(args, parser) -> int:
         if args.command == "eval":
             return _eval(conn, where, args)
         if args.command == "books":
+            if args.label is not None or args.note is not None:
+                return _describe_book(conn, args)
             return _books(conn, args.pattern, args.json)
         if args.command == "models":
             return _models(conn, where, args)
@@ -1746,6 +1756,49 @@ def _no_model_for(role: str, flag: str, env: str, chat: bool = True) -> str:
     return "\n".join(lines)
 
 
+def _describe_book(conn, args) -> int:
+    """Name one book, or say what is worth remembering about it.
+
+    One book, not a pattern's worth: a label is a name for a particular work,
+    and applying one to everything an ambiguous pattern caught is a mistake that
+    is tedious to undo. So an ambiguous pattern is refused with the matches,
+    which is the same shape `--model` uses.
+    """
+    from dyprys.library import books as inspect
+
+    found = inspect(conn, args.pattern) if args.pattern else []
+    if not found:
+        print(f"no book matches {args.pattern!r}" if args.pattern
+              else "--label and --note need a pattern saying which book",
+              file=sys.stderr)
+        return 1
+    if len(found) > 1:
+        print(f"{args.pattern!r} matches {len(found)} books; name one:", file=sys.stderr)
+        for book in found[:8]:
+            print(f"  {book.key}", file=sys.stderr)
+        if len(found) > 8:
+            print(f"  … and {len(found) - 8} more", file=sys.stderr)
+        return 1
+
+    given = {}
+    for field in ("label", "note"):
+        value = getattr(args, field)
+        if value is not None:
+            given[field] = None if value.strip().lower() in ("none", "") else value
+    service.describe_book(conn, str(found[0].key), **given)
+
+    book = inspect(conn, str(found[0].key))[0]
+    print(f"{book.label or book.title}")
+    print(f"  key    {book.key}")
+    if book.label:
+        print(f"  named  {book.label}   (the file is still {book.title})")
+    if book.note:
+        print(f"  note   {book.note}")
+    if not book.label and not book.note:
+        print("  no name or note set")
+    return 0
+
+
 def _books(conn, pattern=None, as_json: bool = False) -> int:
     """The library, or one book in full."""
     from dyprys.library import books as inspect
@@ -1763,8 +1816,12 @@ def _books(conn, pattern=None, as_json: bool = False) -> int:
 
     if pattern:
         for book in found:
-            print(f"\n{book.title}")
+            print(f"\n{book.label or book.title}")
+            if book.label:
+                print(f"  named          {book.label}  (file: {book.title})")
             print(f"  key            {book.key}")
+            if book.note:
+                print(f"  note           {book.note}")
             missing = [s for s in book.sources if not s.present]
             print(f"  sources        {len(book.sources)}"
                   f"{f' ({len(missing)} missing from disk)' if missing else ''}")

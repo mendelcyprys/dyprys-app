@@ -13,6 +13,8 @@ from pathlib import Path
 
 import numpy as np
 
+from dyprys import errors
+
 # EmbeddingGemma is trained with task prefixes, and they matter: on a sample
 # query the documented pair widened the gap between the correct passage and a
 # topical distractor from 0.477 to 0.569.  Taken from the model card, not from
@@ -56,8 +58,20 @@ class Embedder:
         n_gpu_layers: int = -1,
     ):
         from llama_cpp import Llama  # imported lazily: tests use a stub instead
+        from dyprys.rerank import POOLING_RANK, declares
 
         self.path = Path(model_path)
+        # A cross-encoder is not an embedding model, and llama.cpp will not say
+        # so: it loads, and `embed()` returns a number per input instead of a
+        # vector. What follows is hours or days of building a store nothing can
+        # search. The file declares which it is -- RANK means it scores pairs --
+        # so this is read before the weights are opened, not discovered after.
+        if declares(self.path).get("pooling_type") == POOLING_RANK:
+            raise errors.NotAnEmbedder(
+                f"{self.path.name} is a cross-encoder, not an embedding model: "
+                f"it scores (query, passage) pairs and cannot produce the "
+                f"vectors an index is built from. It is a --reranker.",
+                role="model")
         self._llm = Llama(
             model_path=str(self.path),
             embedding=True,

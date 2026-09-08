@@ -165,6 +165,10 @@ class BookInfo:
     id: int
     title: str
     key: str
+    # What someone chose to call it, and what they wanted remembered about it.
+    # `title` stays what ingest derived; see the schema comment on `books`.
+    label: str | None = None
+    note: str | None = None
     sources: list[SourceInfo] = field(default_factory=list)
     chunkings: list[ChunkingInfo] = field(default_factory=list)
     lexical: int = 0
@@ -201,10 +205,16 @@ def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo
     # looked like a hang: the lexical count alone was 139.5 ms a book, because
     # it joined the whole 284,627-row FTS index against segments on a *range*
     # and no index can serve that. 3,453 x 284,627 is a billion comparisons.
-    rows = conn.execute("SELECT id, title, key FROM books ORDER BY title").fetchall()
+    rows = conn.execute(
+        "SELECT id, title, key, label, note FROM books "
+        # By the name a person actually sees, so a labelled book sorts where
+        # they will look for it rather than where its filename put it.
+        "ORDER BY COALESCE(label, title)").fetchall()
     keep = [r for r in rows if wanted is None or r["id"] in wanted]
     ids = {r["id"] for r in keep}
-    books_by_id = {r["id"]: BookInfo(id=r["id"], title=r["title"], key=r["key"]) for r in keep}
+    books_by_id = {r["id"]: BookInfo(id=r["id"], title=r["title"], key=r["key"],
+                                     label=r["label"], note=r["note"])
+                   for r in keep}
 
     for src in conn.execute(
         "SELECT book_id, ordinal, path, size_bytes FROM sources ORDER BY book_id, ordinal"

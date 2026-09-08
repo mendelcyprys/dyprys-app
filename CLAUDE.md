@@ -54,7 +54,7 @@ its rank is a hint, not a verdict.
 | needs the best possible answer | **no** `--route` | routed drops roughly one answer in twenty-five |
 | asks in everyday words about a technical library | add `--expand MODEL` | rewrites the query into the library's vocabulary; ~4 s |
 | wants a written answer, not passages | add `--summarise MODEL` | drafts prose; every quote is checked against the source |
-| means one shelf / author / book | add `-c PATTERN` | matches title or path, case-insensitive |
+| means one shelf / author / book | add `-c PATTERN` | matches title, path or the name you gave it, case-insensitive |
 | means several books they picked | repeat `-c` | the patterns are a union; each must match something |
 | wants the right passage **ranked first** | add `--rerank` | a cross-encoder rescores what was already found; buys rank, not recall |
 
@@ -179,6 +179,16 @@ nothing and losing no vector. Embedding that second chunking then needs a
 command** — `dyp -L NAME ask "…"`, not `dyp ask "…" -L NAME`, which fails with
 `unrecognized arguments`.
 
+**Name a book, and note what it is** — `dyp books PATTERN --label NAME
+--note TEXT`. The label is a display name and something `-c` can match; the file
+is not renamed and keeps its own title, because ingest derives that and rewrites
+it whenever the file moves. The note rides on every result from that book — the
+place for what the index cannot tell you and a reader will not guess: which
+edition, why the sentences run together, whose vocabulary this is. Neither is
+identity; the path still is. **This is the fix for colliding titles** — one
+library can hold two different works called Arakhin, and naming one is how you
+tell them apart and how you scope to just one.
+
 **Health & upkeep** — `dyp status` (totals, what to do next), `dyp check` (what
 drifted, what work is outstanding — never changes anything), `dyp books` (what is
 in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
@@ -232,7 +242,10 @@ can drive both searching and administration structurally:
   (`dyp asked N --json` for one in full) — cross-session memory of prior searches
 
 `dyp ask "…" --json` returns each result as
-`{rank, chunk_id, book, chapter, path, offset, cos, provenance, state, text}`.
+`{rank, chunk_id, book, book_note, chapter, path, offset, cos, provenance,
+state, text}`. `book` is the name someone gave the book if they gave one and the
+derived title otherwise; `book_note` is what they wrote about it, usually null —
+read it, it is there because something about that book is worth knowing.
 `provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`); `text` is `null` when
 the passage could not be proved against its stored hash, and `state` says why —
 **never quote a passage whose `text` is null**. Full schema in `docs/searching.md`.

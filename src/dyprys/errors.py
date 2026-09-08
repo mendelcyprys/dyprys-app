@@ -175,6 +175,16 @@ class NotAReranker(DyprysError):
     """
 
 
+class NotAnEmbedder(DyprysError):
+    """A cross-encoder was named as the model an index is built from.
+
+    The mirror of `NotAReranker`, and the more expensive mistake of the two: a
+    reranker loads as an embedder without complaint and returns one number per
+    input rather than a vector, so the run does not fail -- it spends hours or
+    days building a store no search can use.
+    """
+
+
 class ModelUnavailable(DyprysError):
     """A model was named and cannot be reached.
 

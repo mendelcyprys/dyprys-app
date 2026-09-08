@@ -27,7 +27,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 DEFAULT_DATA_DIR = Path("data")
 DB_FILENAME = "dyprys.sqlite"
@@ -107,8 +107,21 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS books (
     id       INTEGER PRIMARY KEY,
     key      TEXT    NOT NULL UNIQUE,  -- the file or directory that defines it
-    title    TEXT    NOT NULL,
-    added_at TEXT    NOT NULL
+    title    TEXT    NOT NULL,         -- derived from the key; ingest owns it
+    added_at TEXT    NOT NULL,
+    -- What a person chose to call this book, and what they wanted remembered
+    -- about it. Both null until someone says otherwise.
+    --
+    -- `label` is deliberately *not* a rewrite of `title`. Ingest derives `title`
+    -- from the filename and rewrites it on a move, so a name stored there would
+    -- quietly revert the next time the file was relocated. Keeping them apart
+    -- means the derived name stays derived and the chosen one stays chosen.
+    --
+    -- Neither is identity. The key is identity -- titles collide, and one
+    -- library can hold two different books called Arakhin. A label is a display
+    -- name and something `-c` can match, nothing more.
+    label    TEXT,
+    note     TEXT
 );
 
 -- A file belonging to a book. One for a plain text dump; one per chapter for an
@@ -403,6 +416,11 @@ def _check_schema_version(conn: sqlite3.Connection) -> None:
                              ("file_sha256", "TEXT"), ("source_uri", "TEXT"),
                              ("file_path", "TEXT"), ("alias", "TEXT")):
             _add_column(conn, "models", column, spec)
+        # v16: a chosen name and a note per book. Both nullable, so every
+        # existing row is already correct -- an index that has never been told
+        # what to call a book reads exactly as it did before.
+        for column in ("label", "note"):
+            _add_column(conn, "books", column, "TEXT")
         set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     elif int(found) != SCHEMA_VERSION:
         raise ValueError(
@@ -437,7 +455,7 @@ def locate(conn: sqlite3.Connection, chunk_id: int) -> sqlite3.Row | None:
         "       seg.chunking_id, "
         "       src.id AS source_id, src.path, src.ordinal AS source_ordinal, "
         "       src.size_bytes, "
-        "       b.id AS book_id, b.title, b.key "
+        "       b.id AS book_id, b.title, b.key, b.label, b.note "
         "FROM segments seg "
         "JOIN sources src ON src.id = seg.source_id "
         "JOIN books   b   ON b.id   = src.book_id "

@@ -572,6 +572,10 @@ def test_json_payload_shape_is_stable_and_parseable():
     first, second = back["results"]
     assert first == {
         "rank": 1, "chunk_id": 21482, "book": "Principles", "chapter": None,
+        # Null unless the library's owner wrote something about this book --
+        # which edition it is, why its sentences run together. Present in the
+        # shape either way, so a reader never has to test before showing it.
+        "book_note": None,
         "path": "/b/p.txt", "offset": 523017, "cos": 0.5199,
         "provenance": "vec 1 · phrase 1", "state": EXACT,
         "text": "the axon leaves the soma",

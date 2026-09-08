@@ -76,6 +76,24 @@ system, remembered per browser. An inline script in `index.html` applies the
 stored choice before the first paint; the provider keeps it right afterwards,
 including when the system flips under a page that is already open.
 
+**Books** — every book, virtualised, filtered on the server through the matcher
+`-c` uses. `Open` gives one book's card: read it from the top, scope the next
+question to it, give it a name, or write down what it is.
+
+The naming is worth explaining. `title` is derived from the filename and ingest
+rewrites it whenever the file moves, so a chosen name is a separate field and
+neither overwrites the other — the file keeps its name and the book gets one.
+Neither is identity: the key is, because titles collide. `sefaria` holds two
+different works called Arakhin, and the list showed them as two identical rows,
+which is exactly the mistake CLAUDE.md's "attribute from the path, never the
+title" rule exists to prevent. A colliding title now carries the shelf it came
+from, and naming one is the permanent fix. A label is matched by `-c`, so a book
+you have named is one you can scope to by name.
+
+A book's note rides back on every result from it, under the passage — the
+library's `NOTES.md` one book down, in the place where "which edition is this?"
+is actually asked.
+
 **Asked, and the keyboard** — the rail lists what this library has already been
 asked, from either frontend: a question typed in a terminal shows up there, and
 so does one an agent asked through `--json`. Clicking runs it again. `Cmd-K`

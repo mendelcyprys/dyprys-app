@@ -25,6 +25,23 @@ export interface Reading {
  * re-requesting at a new offset. That is also why it is a pane and not a
  * viewer — the point is to read *around* a result, not to replace the file.
  */
+/**
+ * Copy, and say so only if it worked.
+ *
+ * `writeText` rejects rather than throws, and an unhandled rejection is a
+ * console error nobody reads plus a button that says "Copied" when nothing was.
+ * It refuses on an unfocused document and on any non-secure origin that is not
+ * localhost -- so a server reached over a LAN address hits this every time.
+ */
+async function copy(text: string, said: (ok: boolean) => void): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    said(true);
+  } catch {
+    said(false);
+  }
+}
+
 export function Reader({
   library,
   reading,
@@ -39,8 +56,10 @@ export function Reader({
   // asks for the right bytes — initialising it in state fetched offset 0 (the
   // start of a 16 MB file) and showed it for a beat before an effect corrected.
   const [moved, setMoved] = React.useState<number | null>(null);
-  const [copied, setCopied] = React.useState(false);
-  const [copiedPath, setCopiedPath] = React.useState(false);
+  // Null, "yes" or "no" -- three states because a copy that failed must not
+  // report the same thing as one that worked.
+  const [copied, setCopied] = React.useState<"yes" | "no" | null>(null);
+  const [copiedPath, setCopiedPath] = React.useState<"yes" | "no" | null>(null);
   const offset = moved ?? reading?.offset ?? 0;
 
   React.useEffect(() => setMoved(null), [reading?.path, reading?.offset]);
@@ -74,12 +93,18 @@ export function Reader({
             size="sm"
             variant="outline"
             onClick={() => {
-              navigator.clipboard?.writeText(citation);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
+              void copy(citation, (ok) => {
+                setCopied(ok ? "yes" : "no");
+                window.setTimeout(() => setCopied(null), 2500);
+              });
             }}
           >
-            <Copy /> {copied ? "Copied" : "Copy citation"}
+            <Copy />{" "}
+            {copied === "yes"
+              ? "Copied"
+              : copied === "no"
+                ? "Could not copy — select it instead"
+                : "Copy citation"}
           </Button>
           <Tooltip label="move the window back through the file">
             <Button
@@ -103,12 +128,17 @@ export function Reader({
                 // file dialog. A `file://` link would be the obvious control
                 // here and is inert -- a page served over http may not navigate
                 // to one, silently -- so it is a copy button instead.
-                navigator.clipboard?.writeText(reading?.path ?? "");
-                setCopiedPath(true);
-                window.setTimeout(() => setCopiedPath(false), 1500);
+                void copy(reading?.path ?? "", (ok) => {
+                  setCopiedPath(ok ? "yes" : "no");
+                  window.setTimeout(() => setCopiedPath(null), 2500);
+                });
               }}
             >
-              {copiedPath ? "Path copied" : "Copy path"}
+              {copiedPath === "yes"
+                ? "Path copied"
+                : copiedPath === "no"
+                  ? "Could not copy"
+                  : "Copy path"}
             </Button>
           </Tooltip>
         </div>

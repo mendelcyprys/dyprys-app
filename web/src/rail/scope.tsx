@@ -22,14 +22,19 @@ export function Scope({ onEdit }: { onEdit: () => void }) {
           Scope
         </span>
         {scope.length > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-5 px-1.5 text-[11px]"
-            onClick={() => setScope([])}
-          >
-            whole library
-          </Button>
+          // "whole library" read as a *label* sitting beside the heading --
+          // stating the opposite of what was true, directly above a list of the
+          // books actually in scope. It is a button; it has to say so.
+          <Tooltip label="drop every book below and search the whole library again">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-5 px-1.5 text-[11px]"
+              onClick={() => setScope([])}
+            >
+              Clear
+            </Button>
+          </Tooltip>
         )}
       </div>
 

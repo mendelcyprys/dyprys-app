@@ -313,6 +313,21 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         return _json(await indexes.run(
             name, lambda s: service.books_payload(s.conn, pattern)))
 
+    @app.post("/api/libraries/{name}/books/describe")
+    async def describe_book(name: str, body: dict):
+        """Name a book, and say what is worth remembering about it.
+
+        The key travels in the body rather than in the path: a key is a
+        filesystem path, and a path segment that has to survive slashes,
+        spaces and a percent sign is a decoding argument nobody wins.
+
+        `label` and `note` are each applied only when present, so a form that
+        edits one does not clear the other; `null` or `""` removes one.
+        """
+        given = {field: body[field] for field in ("label", "note") if field in body}
+        return _json(await indexes.run(
+            name, lambda s: service.describe_book(s.conn, body.get("key", ""), **given)))
+
     @app.get("/api/libraries/{name}/models")
     async def models(name: str):
         return _json(await indexes.run(

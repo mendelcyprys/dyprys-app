@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, FileWarning, Quote, ShieldAlert } from "lucide-react";
+import { AlertTriangle, FileWarning, Info, Quote, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
 import type { Answer, Answered, Result } from "@/lib/api";
@@ -147,6 +147,18 @@ function Passage({
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-500">
           <AlertTriangle className="size-3" />
           outside your scope — found by exact phrase, which is searched library-wide on purpose
+        </p>
+      )}
+
+      {result.book_note && (
+        // What the owner wrote about this book, where it is needed: which
+        // edition this is, why the sentences run together, whose vocabulary
+        // this is. The library's NOTES.md answers that for the corpus; nothing
+        // answered it for one book, and the passage is where the question
+        // actually arises.
+        <p className="mt-2 flex items-start gap-1.5 border-l-2 border-muted pl-2 text-[11px] leading-snug text-muted-foreground">
+          <Info className="mt-0.5 size-3 shrink-0" />
+          {result.book_note}
         </p>
       )}
 

@@ -921,3 +921,53 @@ def test_a_role_that_is_not_one_says_which_are(client):
 
     assert refused.status_code == 400
     assert refused.json()["choices"] == ["expander", "summariser", "reranker"]
+
+
+def test_a_book_can_be_named_and_annotated(client):
+    """A display name and a note, neither of which is identity.
+
+    `title` is derived from the filename and ingest rewrites it on a move, so a
+    chosen name is stored beside it rather than over it -- otherwise relocating
+    a file would silently revert what someone called the book. The key stays the
+    only thing that says *which* book: titles collide, and one library can hold
+    two different works under one.
+    """
+    first = client.get("/api/libraries/test/books").json()["books"][0]
+    assert first["label"] is None and first["note"] is None, "nothing is named by default"
+
+    named = client.post("/api/libraries/test/books/describe",
+                        json={"key": first["key"], "label": "The good one",
+                              "note": "1962 edition; OCR runs sentences together."})
+
+    assert named.status_code == 200
+    got = named.json()["books"][0]
+    assert got["label"] == "The good one"
+    assert got["note"] == "1962 edition; OCR runs sentences together."
+    assert got["title"] == first["title"], "the derived name is kept, not overwritten"
+
+
+def test_naming_one_field_does_not_clear_the_other(client):
+    """Null is a real value here -- it is how a label is removed -- so a request
+    that omits a field must mean "leave it", not "set it to nothing"."""
+    first = client.get("/api/libraries/test/books").json()["books"][0]
+    client.post("/api/libraries/test/books/describe",
+                json={"key": first["key"], "label": "Named", "note": "Noted"})
+
+    client.post("/api/libraries/test/books/describe",
+                json={"key": first["key"], "label": "Renamed"})
+
+    got = client.get("/api/libraries/test/books").json()["books"][0]
+    assert got["label"] == "Renamed"
+    assert got["note"] == "Noted", "a form editing one field cleared the other"
+
+    # And an explicit empty string is how the UI says "remove it".
+    client.post("/api/libraries/test/books/describe",
+                json={"key": first["key"], "label": ""})
+    assert client.get("/api/libraries/test/books").json()["books"][0]["label"] is None
+
+
+def test_describing_a_book_that_is_not_here_is_a_404(client):
+    refused = client.post("/api/libraries/test/books/describe",
+                          json={"key": "/nowhere/at/all.txt", "label": "x"})
+    assert refused.status_code == 404
+    assert refused.json()["error"] == "no_such_book"

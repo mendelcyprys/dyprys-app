@@ -14,7 +14,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { ModelCoverage } from "@/components/coverage";
 import type { LibraryRow } from "@/lib/api";
 import { useRegistryWrite } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { cn, count } from "@/lib/utils";
 import { RegisterLibrary } from "./register-library";
 
 /**
@@ -64,7 +64,7 @@ export function LibraryPicker({
             <span className="truncate text-[11px] font-normal text-muted-foreground">
               {current
                 ? current.exists
-                  ? `${current.books ?? 0} books`
+                  ? count(current.books ?? 0, "book")
                   : "index not found"
                 : `${libraries.length} registered`}
             </span>

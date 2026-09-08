@@ -11,6 +11,7 @@ import { useSearchSettings } from "@/lib/settings";
 import { ModelChoices } from "@/rail/model-picker";
 import { Reader, type Reading } from "./reader";
 import { Results } from "./results";
+import { count } from "@/lib/utils";
 
 /**
  * The search, streamed.
@@ -183,7 +184,7 @@ export function Ask({ library }: { library: string }) {
         <Badge variant="outline">
           {settings.effort === "rerank" ? `rerank ${settings.depth}` : settings.effort}
         </Badge>
-        {scope.length > 0 && <Badge variant="outline">{scope.length} books</Badge>}
+        {scope.length > 0 && <Badge variant="outline">{count(scope.length, "book")}</Badge>}
         {settings.summarise && (
           <Badge variant="outline">{settings.summariser ?? "summarised"}</Badge>
         )}
@@ -218,7 +219,7 @@ export function Ask({ library }: { library: string }) {
                 className="rounded-md border text-xs"
               >
                 <summary className="cursor-pointer px-3 py-2 text-muted-foreground">
-                  how this was found — {stages.length} steps
+                  how this was found — {count(stages.length, "step")}
                 </summary>
                 <ol className="space-y-0.5 border-t px-3 py-2">
                   {stages.map((stage, index) => (

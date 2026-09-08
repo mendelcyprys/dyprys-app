@@ -717,6 +717,10 @@ def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, 
             "rank": rank,
             "chunk_id": p.chunk_id,
             "book": p.title,
+            # What the library owner wrote about this book, when they wrote
+            # anything -- which edition, why the sentences run together, what
+            # its vocabulary is. Null is the common case.
+            "book_note": p.note,
             "chapter": (p.chapter + 1) if p.chapter else None,
             "path": str(p.path),
             "offset": p.offset,
@@ -1106,6 +1110,12 @@ def books_payload(conn, pattern: str | None = None) -> dict:
         {
             "title": b.title,
             "key": str(b.key),
+            # Null until someone sets one. A frontend shows `label or title`;
+            # both are sent because "this is what you called it" and "this is
+            # what the file is called" are different facts and a rename should
+            # not make the second one unrecoverable.
+            "label": b.label,
+            "note": b.note,
             "chunks": b.chunks,
             "lexical_indexed": b.lexical,
             "sources": [
@@ -1121,6 +1131,39 @@ def books_payload(conn, pattern: str | None = None) -> dict:
             "live_chunks": {name: b.live_for(name) for name in b.per_model},
         }
         for b in inspect(conn, pattern)]}
+
+
+def describe_book(conn, key: str, *, label=..., note=...) -> dict:
+    """Set what a book is called here, and what is worth remembering about it.
+
+    Neither field is identity and neither is touched by ingest. The key stays
+    the only thing that says *which* book -- titles collide, and one library can
+    hold two different works under one of them -- so this changes what is
+    displayed and what `-c` can match, and nothing else.
+
+    Ellipsis rather than None as the default because null is a real value: it is
+    how a label or a note is *removed*, and a caller that sends only one of the
+    two must not silently clear the other.
+    """
+    row = conn.execute("SELECT id, title FROM books WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        raise errors.NoSuchBook(f"no book with key {key!r}; try `dyp books`")
+
+    sets, values = [], []
+    for column, given in (("label", label), ("note", note)):
+        if given is ...:
+            continue
+        # A blank string is how a form says "no", and storing "" would make an
+        # empty label sort and display as a real one.
+        cleaned = (given or "").strip() or None
+        sets.append(f"{column} = ?")
+        values.append(cleaned)
+    if sets:
+        with conn:
+            conn.execute(f"UPDATE books SET {', '.join(sets)} WHERE id = ?",
+                         (*values, row["id"]))
+        db.record_event(conn, "describe", f"{row['title']}: " + ", ".join(sets))
+    return books_payload(conn, key)
 
 
 # The extensions a local model is packaged as. One, today, and named rather

@@ -32,7 +32,7 @@ import {
   useStatus,
 } from "@/lib/queries";
 import { useSearchSettings } from "@/lib/settings";
-import { cn } from "@/lib/utils";
+import { cn, count } from "@/lib/utils";
 import { AddOptions, EmbedOptions } from "./job-options";
 
 /**
@@ -156,8 +156,7 @@ export function Jobs({ library }: { library: string }) {
           <Compass className="size-4 shrink-0 text-amber-500" />
           <span className="flex-1">
             <strong className="font-medium">
-              {unprofiled.toLocaleString()} book{unprofiled === 1 ? "" : "s"} have no routing
-              profile.
+              {count(unprofiled, "book")} {unprofiled === 1 ? "has" : "have"} no routing profile.
             </strong>{" "}
             A routed search cannot return them at any rank, and still comes back with a full set of
             results — nothing in the output says part of the library was skipped.

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FileX2, Search, X } from "lucide-react";
+import { FileX2, Info, Search, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,9 +11,17 @@ import type { BookRow } from "@/lib/api";
 import { useDebounced } from "@/lib/debounce";
 import { useBooks } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
-import { bytes, cn } from "@/lib/utils";
+import { bytes, cn, count } from "@/lib/utils";
+import { BookSheet } from "./book-sheet";
+import { Reader, type Reading } from "./reader";
 
 const ROW = 56;
+
+/** The directory a book sits in — what distinguishes two books of one name. */
+function shelf(key: string): string {
+  const parts = key.split("/").filter(Boolean);
+  return parts[parts.length - 2] ?? key;
+}
 
 /**
  * What is in the library, and what the next question will be asked of.
@@ -29,6 +37,10 @@ export function Books({ library }: { library: string }) {
   const books = useBooks(library, pattern);
   const { scope, setScope } = useSelection();
   const viewport = React.useRef<HTMLDivElement>(null);
+  // Which book is open, by key rather than by value: the row is re-fetched
+  // after a rename, and a copy taken at click time would show the old name.
+  const [opened, setOpened] = React.useState<string | null>(null);
+  const [reading, setReading] = React.useState<Reading | null>(null);
 
   const rows = books.data?.books ?? [];
   const chosen = React.useMemo(() => new Set(scope), [scope]);
@@ -57,6 +69,28 @@ export function Books({ library }: { library: string }) {
   }
 
   const models = Object.keys(rows[0]?.live_chunks ?? {});
+
+  /**
+   * Titles that more than one book here answers to.
+   *
+   * `sefaria` holds Arakhin twice — once from the Mishnah, once from the Talmud
+   * — and the list showed them as two identical rows. CLAUDE.md's standing rule
+   * is to attribute from the path and never from the title alone, and this is
+   * the screen where that rule is easiest to break: the path is there, in grey,
+   * three points smaller than the name.
+   *
+   * So a colliding title gets the shelf it came from beside it. Computed from
+   * the rows already loaded rather than asked of the server, because it is a
+   * property of what is on screen.
+   */
+  const collides = React.useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const row of rows) {
+      const name = row.label ?? row.title;
+      seen.set(name, (seen.get(name) ?? 0) + 1);
+    }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([name]) => name));
+  }, [rows]);
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -136,11 +170,31 @@ export function Books({ library }: { library: string }) {
                 models={models}
                 chosen={chosen.has(rows[item.index].key)}
                 onToggle={() => toggle(rows[item.index].key)}
+                onOpen={() => setOpened(rows[item.index].key)}
+                shared={collides.has(rows[item.index].label ?? rows[item.index].title)}
               />
             </div>
           ))}
         </div>
       </div>
+
+      <BookSheet
+        library={library}
+        book={rows.find((row) => row.key === opened) ?? null}
+        onClose={() => setOpened(null)}
+        onRead={(book) => {
+          const first = book.sources.find((source) => source.present) ?? book.sources[0];
+          // Offset 0 and no text: the reader window is fetched from the file,
+          // and there is no passage to anchor on -- this is the top of the book.
+          setReading({ path: first.path, offset: 0, book: book.label ?? book.title, text: null });
+          setOpened(null);
+        }}
+        onScope={(book) => {
+          setScope([...new Set([...scope, book.key])]);
+          setOpened(null);
+        }}
+      />
+      <Reader library={library} reading={reading} onClose={() => setReading(null)} />
     </div>
   );
 }
@@ -150,11 +204,16 @@ function Book({
   models,
   chosen,
   onToggle,
+  onOpen,
+  shared,
 }: {
   book: BookRow;
   models: string[];
   chosen: boolean;
   onToggle: () => void;
+  onOpen: () => void;
+  /** Another book on this screen answers to the same name. */
+  shared: boolean;
 }) {
   // The file is gone and the chunks remain: search will still rank this book
   // and hand back `text: null`, so it is worth saying here rather than there.
@@ -173,7 +232,21 @@ function Book({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{book.title}</span>
+          <span className="truncate font-medium">{book.label ?? book.title}</span>
+          {shared && (
+            // The shelf it came from, which is what actually tells these apart.
+            // A name alone is not enough to cite by and not enough to pick by.
+            <Tooltip label="another book here has this name — these are different works, and only the path says which is which. Give one a name to tell them apart.">
+              <Badge variant="warning" className="shrink-0 font-mono">
+                {shelf(book.key)}
+              </Badge>
+            </Tooltip>
+          )}
+          {book.note && (
+            <Tooltip label={book.note}>
+              <Info className="size-3 shrink-0 text-muted-foreground" />
+            </Tooltip>
+          )}
           {missing.length > 0 && (
             <Tooltip label="the file is gone; its chunks remain, so a search can rank it and return no text">
               <Badge variant="danger">
@@ -188,9 +261,24 @@ function Book({
       </div>
 
       <div className="hidden w-24 shrink-0 text-right text-[11px] text-muted-foreground md:block">
-        <div className="tabular-nums">{book.chunks.toLocaleString()} chunks</div>
+        <div className="tabular-nums">{count(book.chunks, "chunk")}</div>
         <div className="tabular-nums">{bytes(size)}</div>
       </div>
+
+      <Tooltip label="read it, name it, note what it is">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 shrink-0 px-2"
+          onClick={(event) => {
+            // The row toggles the scope checkbox; this must not do both.
+            event.stopPropagation();
+            onOpen();
+          }}
+        >
+          Open
+        </Button>
+      </Tooltip>
 
       <div className="hidden w-44 shrink-0 flex-col gap-0.5 lg:flex">
         {models.map((model) => {

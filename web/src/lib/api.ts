@@ -93,7 +93,17 @@ export interface BookSource {
 }
 
 export interface BookRow {
+  /** What ingest derived from the filename. Never edited; it moves with the file. */
   title: string;
+  /**
+   * What someone chose to call it here, or null. Show `label ?? title`.
+   *
+   * Not identity and not a rename of the file — but `-c` matches it, so a book
+   * you have named is a book you can scope to by that name.
+   */
+  label: string | null;
+  /** What is worth remembering about this book. Shown wherever it appears. */
+  note: string | null;
   /** The path. The only thing that says *which* book — titles collide. */
   key: string;
   chunks: number;
@@ -191,6 +201,8 @@ export interface Result {
   cos: number | null;
   /** How it was found: "vec 1 · phrase 1". More than one score could carry. */
   provenance: string | null;
+  /** What the owner wrote about this book, if anything. Usually null. */
+  book_note: string | null;
   state: string;
   /** null when the passage could not be proved. Never render it as a quote. */
   text: string | null;
@@ -372,6 +384,17 @@ export const api = {
         pattern ? `?pattern=${encodeURIComponent(pattern)}` : ""
       }`,
     ),
+
+  /** Name a book, or say what is worth remembering about it. Display only. */
+  describeBook: (
+    name: string,
+    key: string,
+    given: { label?: string | null; note?: string | null },
+  ) =>
+    post<{ books: BookRow[] }>(`/libraries/${encodeURIComponent(name)}/books/describe`, {
+      key,
+      ...given,
+    }),
 
   models: (name: string) =>
     request<{ models: ModelRow[] }>(`/libraries/${encodeURIComponent(name)}/models`),
