@@ -123,6 +123,42 @@ export interface ModelRow {
   file_path: string | null;
   /** The index remembers these weights; they are no longer on this machine. */
   file_present: boolean;
+  /**
+   * Which chunking this model embeds, or null until it has embedded anything.
+   *
+   * A model embeds one chunking and the index refuses to move it, so this is
+   * the difference between offering a chunk size and reporting one.
+   */
+  chunking_id: number | null;
+}
+
+export interface Chunking {
+  id: number;
+  /** Target chunk size in bytes — what `add --target` and `embed --target` name. */
+  target: number;
+  overlap: number;
+  chunks: number;
+}
+
+export interface Status {
+  books: number;
+  sources: number;
+  chunks: number;
+  text_bytes: number;
+  /** Every way this library has been split. More than one is a real choice. */
+  chunkings: Chunking[];
+  models: {
+    name: string;
+    dim: number;
+    embedded: number;
+    /** Against this model's own chunking, never the library's total. */
+    live_chunks: number;
+    coverage: number;
+  }[];
+  pending_carries: number;
+  failed_chunks: number;
+  compaction_interrupted: boolean;
+  notes: string | null;
 }
 
 export interface WeightsFile {
@@ -390,7 +426,7 @@ export const api = {
       model,
     }),
 
-  status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
+  status: (name: string) => request<Status>(`/libraries/${encodeURIComponent(name)}/status`),
 
   check: (name: string, deep = false) =>
     request<Check>(`/libraries/${encodeURIComponent(name)}/check?deep=${deep}`),

@@ -542,6 +542,45 @@ def test_the_weights_on_this_machine_can_be_listed(client, index, tmp_path, monk
     assert str(shelf) in found["searched"], "a caller cannot judge an empty list without this"
 
 
+def test_the_directory_of_a_named_model_is_searched_too(client, monkeypatch, tmp_path):
+    """A library with no models of its own is exactly when a picker is needed.
+
+    `models/available` looks where this index's own weights came from -- which
+    finds nothing at all before the first embed, the one moment a browser cannot
+    fall back on typing a path it does not know. `$DYPRYS_MODEL` names a file,
+    and the directory holding it is where the others almost certainly are.
+    """
+    shelf = tmp_path / "elsewhere"
+    shelf.mkdir()
+    (shelf / "embedder.gguf").write_bytes(b"z" * 33)
+    monkeypatch.setenv("DYPRYS_MODEL", str(shelf / "embedder.gguf"))
+
+    found = client.get("/api/libraries/test/models/available").json()
+
+    assert {row["name"] for row in found["models"]} == {"embedder.gguf"}
+
+
+def test_a_model_says_which_chunking_it_embeds(client):
+    """The difference between offering a chunk size and reporting one.
+
+    A model embeds one chunking and `db.bind_chunking` refuses to move it, so a
+    frontend that offers `--target` for a bound model is offering a choice whose
+    only outcome is a subprocess that exits a second after it starts -- which
+    over HTTP is indistinguishable from a job that never ran.
+    """
+    rows = client.get("/api/libraries/test/models").json()["models"]
+    chunkings = client.get("/api/libraries/test/status").json()["chunkings"]
+
+    assert rows, "the fixture index has been embedded"
+    known = {c["id"] for c in chunkings}
+    for row in rows:
+        # Null is a real answer -- a registered model that has not embedded
+        # anything is unbound, and that is precisely when the choice is open.
+        assert row["chunking_id"] is None or row["chunking_id"] in known, (
+            "a binding that names no chunking would send a frontend a target "
+            "it cannot resolve")
+
+
 def test_a_directory_that_is_not_there_is_not_an_error(client, monkeypatch, tmp_path):
     """A picker opening is not the moment to fail over a stale config entry."""
     monkeypatch.setenv("DYPRYS_MODEL_DIR", str(tmp_path / "gone"))

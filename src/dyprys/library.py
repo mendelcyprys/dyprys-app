@@ -43,6 +43,11 @@ class ModelInfo:
     centroids_actual: int
     alias: str | None = None      # the short thing you can type for --model
     file_path: str | None = None  # where the weights were last opened from
+    # Which chunking this model embeds, once it has embedded anything. A
+    # model embeds one and only one, and `db.bind_chunking` refuses to move
+    # it -- so a caller offering to start an embed has to know this before
+    # it offers a target, not after the subprocess dies saying so.
+    chunking_id: int | None = None
 
     @property
     def coverage(self) -> float:
@@ -91,6 +96,7 @@ def models(conn: sqlite3.Connection, directory: Path) -> list[ModelInfo]:
                 centroids_actual=_disk(db.centroids_path(directory, row["id"]))[1],
                 alias=row["alias"],
                 file_path=row["file_path"],
+                chunking_id=row["chunking_id"],
             )
         )
     return out

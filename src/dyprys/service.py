@@ -1289,6 +1289,10 @@ def models_payload(conn, directory) -> dict:
                         "stale_books": m.stale_books},
             "file_path": m.file_path,
             "file_present": bool(m.file_path) and Path(m.file_path).exists(),
+            # Null until this model has embedded something. A frontend that
+            # offers a chunk size needs it: bound, the choice is already
+            # made and cannot be changed; unbound, it is a real choice.
+            "chunking_id": m.chunking_id,
         }
         for m in inspect(conn, directory)]}
 

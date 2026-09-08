@@ -8,16 +8,32 @@ import {
   Play,
   ScrollText,
   Shrink,
+  SlidersHorizontal,
   Type,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
-import { DyprysError, type JobKind, type JobState } from "@/lib/api";
-import { useCheck, useJobControls, useJobLog, useJobs, useModels } from "@/lib/queries";
+import {
+  DyprysError,
+  type JobKind,
+  type JobState,
+  type ModelRow,
+  type Status,
+  type WeightsFile,
+} from "@/lib/api";
+import {
+  useAvailableModels,
+  useCheck,
+  useJobControls,
+  useJobLog,
+  useJobs,
+  useModels,
+  useStatus,
+} from "@/lib/queries";
 import { useSearchSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { AddOptions, EmbedOptions } from "./job-options";
 
 /**
  * The kinds that build vectors, and so must be told which model to build for.
@@ -29,6 +45,16 @@ import { cn } from "@/lib/utils";
  * afterwards is only the consolation.
  */
 const NEEDS_MODEL: JobKind[] = ["embed", "route"];
+
+/**
+ * The kinds whose flags change what the run *is*, and so are set before it
+ * starts rather than defaulted into.
+ *
+ * `add` decides how the text is cut, permanently; `embed` decides how long it
+ * runs, over which chunking, at what quantisation — and one of those cannot be
+ * changed afterwards either. The other three take nothing worth a form.
+ */
+const CONFIGURED: JobKind[] = ["embed", "add"];
 
 const KINDS: {
   kind: JobKind;
@@ -72,6 +98,11 @@ export function Jobs({ library }: { library: string }) {
   const states = useJobs(library).data;
   const controls = useJobControls(library);
   const models = useModels(library).data?.models ?? [];
+  const status = useStatus(library).data;
+  // Only while a form that offers them is open: listing .gguf files walks the
+  // model directories, and nothing else on this tab needs them.
+  const [configuring, setConfiguring] = React.useState<JobKind | null>(null);
+  const weights = useAvailableModels(library, configuring === "embed").data?.models ?? [];
   const { settings } = useSearchSettings();
   // One model is not a choice, so it is the answer; more than one and nobody
   // may guess, this UI included.
@@ -89,12 +120,17 @@ export function Jobs({ library }: { library: string }) {
   const held = Object.values(states ?? {}).find((job) => job.busy);
 
   function start(kind: JobKind, options: Record<string, unknown> = {}) {
+    // The rail's model unless the form named one: a form that offers a model
+    // it is not going to send would be a control that does nothing.
+    const wanted =
+      NEEDS_MODEL.includes(kind) && model && !options.model ? { ...options, model } : options;
     controls.start.mutate(
-      { kind, options: NEEDS_MODEL.includes(kind) && model ? { ...options, model } : options },
+      { kind, options: wanted },
       {
         onSuccess: () => {
           setStartedAt((all) => ({ ...all, [kind]: Date.now() }));
           setShowLog(kind);
+          setConfiguring(null);
         },
       },
     );
@@ -164,6 +200,12 @@ export function Jobs({ library }: { library: string }) {
           needsModel={NEEDS_MODEL.includes(each.kind) && mustChoose}
           blocked={Boolean(held) && !states?.[each.kind].running}
           startedAt={startedAt[each.kind]}
+          status={status}
+          models={models}
+          weights={weights}
+          selectedModel={model}
+          open={configuring === each.kind}
+          onConfigure={() => setConfiguring(configuring === each.kind ? null : each.kind)}
           onStart={(options) => start(each.kind, options)}
           onStop={(force) => controls.stop.mutate({ kind: each.kind, force })}
           busy={controls.start.isPending || controls.stop.isPending}
@@ -204,6 +246,12 @@ function Job({
   needsModel,
   blocked,
   startedAt,
+  status,
+  models,
+  weights,
+  selectedModel,
+  open,
+  onConfigure,
   onStart,
   onStop,
   busy,
@@ -216,14 +264,20 @@ function Job({
   needsModel: boolean;
   blocked: boolean;
   startedAt?: number;
+  status?: Status;
+  models: ModelRow[];
+  weights: WeightsFile[];
+  selectedModel: string | null;
+  open: boolean;
+  onConfigure: () => void;
   onStart: (options?: Record<string, unknown>) => void;
   onStop: (force?: boolean) => void;
   busy: boolean;
   log: boolean;
   onLog: () => void;
 }) {
-  const [paths, setPaths] = React.useState("");
   const running = state?.running ?? false;
+  const configured = CONFIGURED.includes(meta.kind);
   // Started here and no longer running. Nothing records an exit code — the run
   // is detached and outlives this process on purpose — so a job that did its
   // work in three seconds and one that died on a missing flag look identical
@@ -264,7 +318,18 @@ function Job({
               Stop
             </Button>
           </Tooltip>
-        ) : meta.kind === "add" ? null : (
+        ) : configured ? (
+          // Never one click. `embed` can run for days and `add` decides how the
+          // text is cut for good, so both are set up before they start.
+          <Button
+            size="sm"
+            variant={open ? "secondary" : "outline"}
+            onClick={onConfigure}
+            disabled={blocked}
+          >
+            <SlidersHorizontal /> {open ? "Cancel" : "Set up"}
+          </Button>
+        ) : (
           <Tooltip
             label={
               needsModel
@@ -286,33 +351,26 @@ function Job({
         )}
       </header>
 
-      {meta.kind === "add" && !running && (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            onStart({
-              paths: paths
-                .split("\n")
-                .map((line) => line.trim())
-                .filter(Boolean),
-            });
-          }}
-          className="mt-3 flex items-center gap-2"
-        >
-          <Input
-            value={paths}
-            onChange={(event) => setPaths(event.target.value)}
-            placeholder="/a/directory/of/text — on the machine running the server"
-            className="font-mono text-xs"
-            spellCheck={false}
-          />
-          <Button type="submit" size="sm" variant="outline" disabled={!paths.trim() || busy}>
-            <Play /> Run
-          </Button>
-        </form>
+      {open && !running && meta.kind === "add" && (
+        <AddOptions status={status} busy={busy} onStart={onStart} />
       )}
 
-      {needsModel && !running && (
+      {open && !running && meta.kind === "embed" && (
+        <EmbedOptions
+          status={status}
+          models={models}
+          weights={weights}
+          selected={selectedModel}
+          outstanding={outstanding}
+          busy={busy}
+          onStart={onStart}
+        />
+      )}
+
+      {needsModel && !running && !configured && (
+        // Only for the kinds with no form of their own. `embed` asks for the
+        // model itself, so pointing at the rail there would be pointing away
+        // from the control that fixes it.
         <p className="mt-3 text-xs text-amber-500">
           This library has been embedded by more than one model, so `{meta.kind}` refuses to guess
           which vectors it is for. Choose one in the rail.

@@ -3,6 +3,7 @@ import { BookOpen, CircleDot, Database, Layers } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { ThemeToggle } from "@/components/theme-toggle";
 import type { Libraries } from "@/lib/api";
 import { useHealth } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
@@ -98,12 +99,13 @@ export function Rail({
 
       {current?.exists && <Asked onRun={onAsk} />}
 
-      <div className="mt-auto space-y-1">
+      <div className="mt-auto flex items-end justify-between gap-2">
         <Tooltip label={libraries.registry_path}>
-          <p className="cursor-default truncate text-[10px] text-muted-foreground">
+          <p className="min-w-0 cursor-default truncate text-[10px] text-muted-foreground">
             registry: {libraries.registry_path.split("/").slice(-1)[0]}
           </p>
         </Tooltip>
+        <ThemeToggle />
       </div>
 
       {library && <NotesDialog library={library} open={notesOpen} onOpenChange={setNotesOpen} />}

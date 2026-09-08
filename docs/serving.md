@@ -195,10 +195,15 @@ and a UI keeping it per library in `localStorage` is the whole of that design.
 
 Where to look is the **frontend's** question and is answered in `api.py`: the
 directories of weights this index already remembers (the likeliest home, and
-needing no configuration), `$DYPRYS_MODEL_DIR` for anywhere else, and
+needing no configuration), the directory holding `$DYPRYS_MODEL` or
+`$DYPRYS_RERANKER`, `$DYPRYS_MODEL_DIR` for anywhere else, and
 `~/.cache/qmd/models`. One level down each, since models are commonly kept one
 directory per model. `searched` comes back with the list, because an empty
 result is only readable next to where it looked.
+
+The env-named directories matter for the case the first entry cannot cover: a
+library that has **never been embedded** remembers no weights, so a picker that
+looked only there would be empty at the one moment it is most needed.
 
 Nothing here guesses what a file *is*. A cross-encoder and a chat model are both
 a `.gguf` and the difference is not in the name; a guess reported as a fact
@@ -393,3 +398,40 @@ and three test files keep it that way:
 If you add an endpoint, add it as a call into `service` plus a serialisation. A
 route that reaches into `db` or `search` directly is how the two frontends start
 disagreeing.
+
+
+## Starting a build, and the two choices that cannot be taken back
+
+`POST /jobs/{kind}` takes the flags of the command it spawns, allow-listed per
+kind in `jobs.FLAGS` — an option that table does not name cannot reach `argv` at
+all, and a value is coerced to its declared type before it gets there. `embed`
+accepts `model`, `target`, `for`, `duty`, `limit`, `batch`, `int8` and
+`collection`; `add` accepts `paths`, `ext`, `chapters`, `target`, `overlap` and
+`deep`.
+
+Two of these are settled once and never again, and both fail the same way if a
+caller gets them wrong: the subprocess exits about a second after it starts,
+which over HTTP looks exactly like a job that never ran. So a frontend should
+read the state before offering the choice rather than after.
+
+**Which chunking a model embeds.** `GET /models` reports `chunking_id` per
+model: null while the model has embedded nothing, and the id of a chunking
+afterwards. `db.bind_chunking` refuses to move an existing binding — two
+granularities in one vector population means a search returns a passage and a
+piece of that same passage as separate results — so once it is set, `--target`
+is a report, not a control. A second chunk size needs a second model.
+
+**Quantisation.** `int8` is settable only as a model is first registered.
+Afterwards `dyp embed --int8` against an `fp32` model exits 2 and says to run
+`dyp models --quantise`.
+
+`GET /status` carries `chunkings` — every way the library has been split, with
+`target`, `overlap` and how many chunks use each. A library split more than one
+way cannot be embedded without saying which way, and this is where the sizes to
+offer come from.
+
+A library grows a second chunking through `add`, not through `embed`: re-running
+`add` over paths already in the index with a different `--target` is recognised
+as the same bytes under a chunking they have not been split by before. The book
+is reported as `rechunked`, the existing chunking is untouched, and no vector is
+lost.

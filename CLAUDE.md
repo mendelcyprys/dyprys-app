@@ -143,6 +143,11 @@ Occasional, but yours to do when asked. Never do the slow ones unprompted.
 
 **Add text** — `dyp add DIR`. Plain `.txt` by default; `--ext .md,.txt` to widen;
 `--chapters` when each directory is one book and its files are chapters.
+`--target BYTES` sets the chunk size, and this is the **only** place it is set:
+re-adding paths already in the index at a different target is not a re-ingest —
+it records a second chunking alongside the first ("rechunked"), disturbing
+nothing and losing no vector. Embedding that second chunking then needs a
+**second model**, since a model embeds one chunking and cannot be moved.
 
 **Embed** (turns text into vectors — the one slow, expensive step):
 - **You need a model file first.** An embedding model is a local GGUF file passed
