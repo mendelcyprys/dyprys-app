@@ -6,6 +6,13 @@ build/
 *.egg-info/
 .pytest_cache/
 
+# uv's project lockfile. Not committed because nothing here reads it: the
+# documented install is `uv pip install -e ".[dev]"`, which is the pip-compatible
+# interface and neither writes nor consults uv.lock — only `uv sync` / `uv run`
+# do. README says uv is optional and plain pip works identically, so a lockfile
+# would be a file no documented workflow touches, going stale unwatched.
+uv.lock
+
 # Local data — never commit the index, the vectors, or the library
 *.sqlite
 *.sqlite-wal
