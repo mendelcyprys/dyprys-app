@@ -205,10 +205,27 @@ The env-named directories matter for the case the first entry cannot cover: a
 library that has **never been embedded** remembers no weights, so a picker that
 looked only there would be empty at the one moment it is most needed.
 
-Nothing here guesses what a file *is*. A cross-encoder and a chat model are both
-a `.gguf` and the difference is not in the name; a guess reported as a fact
-would be worse than nothing, since a chat model used as a reranker rescores
-silently and plausibly.
+Nothing here guesses what a file *is*, but each row does report what the file
+**says**. `rerank` is read from the GGUF's own `pooling_type`: a cross-encoder
+declares RANK where an embedding model declares MEAN or CLS. That is a metadata
+read of about 40–100 ms, cached per (path, size), and it is a fact from the file
+rather than an inference from its name — which matters, because
+`embeddinggemma-300M-Q8_0.gguf` and `qwen3-reranker-0.6b-q8_0.gguf` are the same
+shape and one of them is not a reranker.
+
+`rerank` has three states. `true` and `false` are the file's own declaration;
+**`null` means it did not say**, and a caller must not read that as `false` — a
+`.gguf` converted before the key existed can still rerank, and refusing it on
+missing metadata would lock it out of a job it can do. `architecture` comes back
+alongside it (`qwen3`, `jina-bert-v2`, …).
+
+Naming a `false` file as the reranker — on a search or as a stored default — is
+`not_a_reranker`, a 400. This is the one refusal in the system that exists
+purely because the alternative is *silent*: llama.cpp honours
+`pooling_type=RANK` on any model, so an embedding model loads without complaint
+and returns one number per pair that looks exactly like a score. Measured on an
+obvious pair, embeddinggemma-300M ranked an irrelevant passage above the answer
+and raised nothing.
 
 `GET/POST /defaults` is the browser's `dyp models --summariser NAME`. The three
 optional roles — `expander`, `summariser`, `reranker` — are **never remembered

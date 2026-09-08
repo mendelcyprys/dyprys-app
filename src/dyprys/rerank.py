@@ -30,9 +30,67 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from dyprys import db
+from dyprys import db, errors
 from dyprys.search import Hit
 from dyprys.text import read_span
+
+# `LLAMA_POOLING_TYPE_RANK`, as a plain number so reading a file's metadata does
+# not require llama_cpp to be importable.
+POOLING_RANK = 4
+
+
+def declares(model_path: str | Path) -> dict:
+    """What a `.gguf` says it is: its architecture and its pooling type.
+
+    A metadata-only load -- 40 ms for a 300 MB file, 100 ms for a 600 MB one --
+    so this is cheap enough to run over every candidate in a picker.
+
+    This is the one thing about a model file that can be *known* rather than
+    guessed. `pooling_type` is written into the GGUF by whoever converted it,
+    and a cross-encoder declares `4` (RANK) where an embedding model declares
+    `1` (MEAN) or `2` (CLS). The filename says nothing: `hf_ggml-org_
+    embeddinggemma-300M-Q8_0.gguf` and `hf_ggml-org_qwen3-reranker-0.6b-q8_0
+    .gguf` are the same shape and one of them is not a reranker.
+
+    Empty when the file cannot be read, or llama_cpp is not installed. Absence
+    is not evidence: a caller must not treat "we could not tell" as "no".
+    """
+    try:
+        from llama_cpp import Llama
+    except ImportError:
+        return {}
+    try:
+        probe = Llama(model_path=str(model_path), vocab_only=True, verbose=False)
+        meta = dict(probe.metadata)
+    except Exception:
+        # A file that will not open is a question for whoever tries to use it,
+        # not for a listing. Saying nothing is the honest answer here.
+        return {}
+    found: dict = {}
+    for key, value in meta.items():
+        # Keys are `<arch>.<name>`, and the architecture is the prefix -- which
+        # is how this learns the arch without a second lookup.
+        if key.endswith(".pooling_type"):
+            found["architecture"] = key.rsplit(".", 1)[0]
+            try:
+                found["pooling_type"] = int(value)
+            except (TypeError, ValueError):
+                pass
+    if "architecture" not in found:
+        found["architecture"] = meta.get("general.architecture")
+    return found
+
+
+def can_rerank(model_path: str | Path) -> bool | None:
+    """Whether this file declares itself a cross-encoder. None: it did not say.
+
+    Three states rather than two, deliberately. A `.gguf` that cannot be read,
+    or one converted before the key existed, is unknown -- and refusing an
+    unknown file would lock someone out of a working reranker on the strength of
+    missing metadata.
+    """
+    pooling = declares(model_path).get("pooling_type")
+    return None if pooling is None else pooling == POOLING_RANK
 
 # A cross-encoder scores one string containing both query and passage, and the
 # framing is not cosmetic: it is what the model was trained on. Measured on 12
@@ -57,10 +115,20 @@ TEMPLATES = {
 }
 
 
-def template_for(model_path: Path) -> str:
-    """Pick a template from the model's name, since it must match its training."""
+def template_for(model_path: Path, architecture: str | None = None) -> str:
+    """Pick a template, which must match what the model was trained on.
+
+    The filename first, because that is what the measurement above was taken
+    against. The declared architecture second, for the case the filename says
+    nothing -- a BERT-family cross-encoder handed the Qwen3 chat template scores
+    *worse than not reranking at all*, and falling straight to `qwen3` made that
+    the outcome for every file not named bge or jina.
+    """
     name = model_path.stem.lower()
     if "bge" in name or "jina" in name:
+        return "bge"
+    arch = (architecture or "").lower()
+    if arch and "bert" in arch:
         return "bge"
     return "qwen3"
 
@@ -91,6 +159,22 @@ class Reranker:
         from llama_cpp import LLAMA_POOLING_TYPE_RANK, Llama
 
         self.path = Path(model_path)
+        # Before the expensive load, and before any scoring: llama.cpp honours
+        # `pooling_type=RANK` on *any* model, so an embedding model loads here
+        # without complaint and returns numbers that are not relevance. Measured
+        # on one obvious pair, embeddinggemma-300M ranked an irrelevant passage
+        # above the answer (-27.4 against -35.8) and said nothing about it. That
+        # is the failure this refusal exists to convert into an error.
+        said = declares(self.path)
+        pooling = said.get("pooling_type")
+        if pooling is not None and pooling != POOLING_RANK:
+            raise errors.NotAReranker(
+                f"{self.path.name} is not a cross-encoder: it declares pooling "
+                f"type {pooling}, and a reranker declares {POOLING_RANK}. Used "
+                f"as one it returns numbers that are not relevance, and ranks "
+                f"silently and plausibly wrong.",
+                role="reranker",
+            )
         self._llm = Llama(
             model_path=str(self.path),
             embedding=True,
@@ -103,7 +187,8 @@ class Reranker:
             n_gpu_layers=n_gpu_layers,
             verbose=False,
         )
-        self.template_name = template or template_for(self.path)
+        self.template_name = template or template_for(self.path,
+                                                       said.get("architecture"))
         if self.template_name not in TEMPLATES:
             raise ValueError(
                 f"unknown reranker template {self.template_name!r}; "

@@ -2011,6 +2011,12 @@ def _set_default_model(conn, key: str, value: str) -> int:
             print(f"  installed:  {'   '.join(installed[:6])}", file=sys.stderr)
             print(f"  or:  ollama pull {value}", file=sys.stderr)
             return 1
+    elif key == "reranker":
+        # `service.check_reranker` rather than a second copy of it here: the
+        # file has to exist *and* be a cross-encoder, and an index whose stored
+        # reranker is an embedding model ranks wrongly on every search that
+        # uses it, without ever failing.
+        service.check_reranker(value)
     elif not Path(value).exists():
         print(f"no such file: {value}", file=sys.stderr)
         return 1

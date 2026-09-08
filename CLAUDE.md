@@ -85,7 +85,11 @@ waiting, and search warns when it is routing around some.
 **`--rerank` needs a second model, and bare `--rerank` errors rather than
 falling back to anything.** It takes a cross-encoder GGUF — not an ollama chat
 name — via `--reranker PATH`, `$DYPRYS_RERANKER`, or a default stored in the
-index.
+index. **Not every `.gguf` will do**: an embedding model is refused, because
+llama.cpp loads one as a reranker without complaint and returns numbers that are
+not relevance. The refusal reads the file's own declared `pooling_type`, so it
+is a fact rather than a guess from the name — and it fires when the default is
+*set*, not weeks later when a search uses it.
 
 **No optional model is remembered from being used.** The expander, summariser
 and reranker are each stored only when set on purpose:

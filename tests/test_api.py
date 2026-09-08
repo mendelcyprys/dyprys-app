@@ -15,12 +15,15 @@ it could not be proved, and a path arriving from a query string.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 pytest.importorskip("fastapi", reason="install dyprys[api]")
 api = pytest.importorskip("dyprys.api", reason="dyprys.api does not exist yet")
 from fastapi.testclient import TestClient  # noqa: E402
+
+from dyprys import service  # noqa: E402
 
 from tests.indexes import SENTINEL, add_model, embedded_index, write_books  # noqa: E402
 
@@ -558,6 +561,65 @@ def test_the_directory_of_a_named_model_is_searched_too(client, monkeypatch, tmp
     found = client.get("/api/libraries/test/models/available").json()
 
     assert {row["name"] for row in found["models"]} == {"embedder.gguf"}
+
+
+def test_the_listing_says_which_files_can_actually_rerank(client, monkeypatch, tmp_path):
+    """The one thing about a `.gguf` that can be known rather than guessed.
+
+    A cross-encoder and an embedding model are both a `.gguf` and the names do
+    not distinguish them -- but the file does, in its own `pooling_type`. This
+    is the fact that lets a picker offer only what will work, instead of
+    offering everything and letting one of them rank silently wrong.
+
+    Three states, not two: null means the file did not say, and a caller must
+    not read that as "no".
+    """
+    shelf = tmp_path / "weights"
+    shelf.mkdir()
+    for name in ("crossenc.gguf", "embedder.gguf", "quiet.gguf"):
+        (shelf / name).write_bytes(b"x" * 10)
+    monkeypatch.setenv("DYPRYS_MODEL_DIR", str(shelf))
+    said = {"crossenc.gguf": {"architecture": "qwen3", "pooling_type": 4},
+            "embedder.gguf": {"architecture": "bert", "pooling_type": 1},
+            "quiet.gguf": {}}
+    monkeypatch.setattr("dyprys.rerank.declares",
+                        lambda path: said[Path(path).name])
+    monkeypatch.setattr(service, "_DESCRIBED", {})
+
+    found = client.get("/api/libraries/test/models/available").json()
+    by_name = {row["name"]: row for row in found["models"]}
+
+    assert by_name["crossenc.gguf"]["rerank"] is True
+    assert by_name["embedder.gguf"]["rerank"] is False
+    assert by_name["quiet.gguf"]["rerank"] is None, (
+        "unknown is not no -- a .gguf converted before the key existed can "
+        "still rerank, and refusing it on missing metadata locks it out")
+    assert by_name["crossenc.gguf"]["architecture"] == "qwen3"
+
+
+def test_remembering_an_embedding_model_as_the_reranker_is_refused(
+        client, monkeypatch, tmp_path):
+    """Refused when it is set, not when a search finally uses it.
+
+    The existing check is that the file is there; this is that it is the right
+    kind. They are validated in the same place for the same reason -- weeks can
+    pass between storing a default and the search that needs it -- but only one
+    of them would ever announce itself. A missing file fails loudly; an
+    embedding model forced into rank pooling returns plausible numbers and
+    ranks wrongly, forever, at exit 0.
+    """
+    weights = tmp_path / "embedder.gguf"
+    weights.write_bytes(b"x" * 10)
+    monkeypatch.setattr("dyprys.rerank.declares",
+                        lambda path: {"architecture": "bert", "pooling_type": 1})
+
+    refused = client.post("/api/libraries/test/defaults",
+                          json={"role": "reranker", "model": str(weights)})
+
+    assert refused.status_code == 400
+    body = refused.json()
+    assert body["error"] == "not_a_reranker"
+    assert body["role"] == "reranker"
 
 
 def test_a_model_says_which_chunking_it_embeds(client):

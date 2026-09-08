@@ -166,6 +166,17 @@ export interface WeightsFile {
   name: string;
   bytes: number;
   directory: string;
+  /** What the GGUF declares itself to be, e.g. "qwen3", "jina-bert-v2". */
+  architecture: string | null;
+  /**
+   * Whether this file declares itself a cross-encoder — read from its own
+   * `pooling_type`, not inferred from its name.
+   *
+   * **Null means the file did not say**, which is not the same as false: a
+   * .gguf converted before the key existed can still rerank. Treating unknown
+   * as no would lock someone out of a working model.
+   */
+  rerank: boolean | null;
 }
 
 export interface Result {
