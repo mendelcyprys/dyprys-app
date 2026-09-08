@@ -8,13 +8,7 @@ import type { LibraryModel } from "@/lib/api";
  * ways would otherwise show every model permanently short of complete. That is
  * what the server already divides by, so this only has to not undo it.
  */
-export function CoverageBar({
-  fraction,
-  className,
-}: {
-  fraction: number;
-  className?: string;
-}) {
+export function CoverageBar({ fraction, className }: { fraction: number; className?: string }) {
   const done = fraction >= 0.999;
   return (
     <span className={cn("inline-flex items-center gap-1.5", className)}>

@@ -25,7 +25,13 @@ const TooltipContent = React.forwardRef<
 TooltipContent.displayName = "TooltipContent";
 
 /** The common case as one element, since every use here is trigger + text. */
-export function Tooltip({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+export function Tooltip({
+  label,
+  children,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <TooltipRoot>
       <TooltipTrigger asChild>{children}</TooltipTrigger>

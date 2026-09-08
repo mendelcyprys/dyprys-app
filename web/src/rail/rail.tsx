@@ -6,9 +6,12 @@ import { Tooltip } from "@/components/ui/tooltip";
 import type { Libraries } from "@/lib/api";
 import { useHealth } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
+import { useSearchSettings } from "@/lib/settings";
 import { LibraryPicker } from "./library-picker";
 import { NotesDialog } from "./notes";
+import { ModelPicker } from "./model-picker";
 import { Scope } from "./scope";
+import { SettingsSheet } from "./settings-sheet";
 
 /**
  * The state of the question: which library, and (later) which model and which
@@ -25,6 +28,7 @@ export function Rail({
   const { library, select } = useSelection();
   const [notesOpen, setNotesOpen] = React.useState(false);
   const health = useHealth();
+  const { settings, update } = useSearchSettings();
   const current = libraries.libraries.find((row) => row.name === library);
   const warm = (library && health.data?.loaded[library]) || [];
 
@@ -35,7 +39,19 @@ export function Rail({
         <span className="text-sm font-semibold tracking-tight">dyprys</span>
       </div>
 
-      <LibraryPicker libraries={libraries.libraries} selected={library} onSelect={(name) => select(name || null)} />
+      <LibraryPicker
+        libraries={libraries.libraries}
+        selected={library}
+        onSelect={(name) => select(name || null)}
+      />
+
+      {current?.exists && library && (
+        <ModelPicker
+          library={library}
+          selected={settings.model}
+          onSelect={(name) => update({ model: name })}
+        />
+      )}
 
       {current?.exists && <Scope onEdit={onEditScope} />}
 
@@ -55,6 +71,8 @@ export function Rail({
             />
           </dl>
 
+          <SettingsSheet library={current.name} />
+
           <Button
             variant="outline"
             size="sm"
@@ -62,7 +80,11 @@ export function Rail({
             onClick={() => setNotesOpen(true)}
           >
             <BookOpen /> Notes
-            {current.notes && <Badge variant="outline" className="ml-auto">has some</Badge>}
+            {current.notes && (
+              <Badge variant="outline" className="ml-auto">
+                has some
+              </Badge>
+            )}
           </Button>
 
           <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
@@ -79,14 +101,20 @@ export function Rail({
         </Tooltip>
       </div>
 
-      {library && (
-        <NotesDialog library={library} open={notesOpen} onOpenChange={setNotesOpen} />
-      )}
+      {library && <NotesDialog library={library} open={notesOpen} onOpenChange={setNotesOpen} />}
     </aside>
   );
 }
 
-function Row({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+function Row({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-muted-foreground">{icon}</span>

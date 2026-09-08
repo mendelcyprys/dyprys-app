@@ -43,8 +43,8 @@ function stored(key: string): string[] {
 }
 
 export function SelectionProvider({ children }: { children: React.ReactNode }) {
-  const [library, setLibrary] = React.useState<string | null>(
-    () => window.localStorage.getItem(LIBRARY),
+  const [library, setLibrary] = React.useState<string | null>(() =>
+    window.localStorage.getItem(LIBRARY),
   );
   const [scope, setScopeState] = React.useState<string[]>(() =>
     library ? stored(scopeKey(library)) : [],

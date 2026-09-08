@@ -10,8 +10,7 @@ const queries = new QueryClient({
     queries: {
       // A refusal is an answer, not a flake: retrying a 404 or a
       // model_ambiguous only delays the picker the user is meant to see.
-      retry: (attempt, error) =>
-        attempt < 2 && (error as { status?: number }).status === 0,
+      retry: (attempt, error) => attempt < 2 && (error as { status?: number }).status === 0,
       staleTime: 5_000,
       refetchOnWindowFocus: false,
     },

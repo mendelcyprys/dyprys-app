@@ -318,6 +318,44 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         return _json(await indexes.run(
             name, lambda s: service.models_payload(s.conn, s.directory)))
 
+    @app.post("/api/libraries/{name}/models/{model}/alias")
+    async def name_model(name: str, model: str, body: dict = Body(default_factory=dict)):
+        """A short name to type instead of a weights handle.
+
+        Stored in the index, not in this client, so an alias chosen here is one
+        `dyp --model` accepts in a terminal.
+        """
+        unknown = set(body) - {"alias"}
+        if unknown:
+            raise errors.BadRequest(
+                f"unknown field(s): {', '.join(sorted(unknown))}. Takes: alias.")
+        return _json(await indexes.run(
+            name, lambda s: service.name_model(s.conn, model, body.get("alias", ""))))
+
+    @app.get("/api/libraries/{name}/models/available")
+    async def available_models(name: str):
+        """The .gguf files on this machine, so a reranker can be chosen.
+
+        Where to look is the frontend's question and is answered here rather
+        than in `service`: the directories of the weights this index already
+        remembers (the likeliest home, and needing no configuration),
+        `$DYPRYS_MODEL_DIR` for anywhere else, and the cache `dyp` documents.
+
+        Reading the environment is allowed here and nowhere below. A core module
+        that resolved a model directory itself would answer according to the
+        shell that launched the server rather than the request that arrived.
+        """
+        def look(session):
+            known = service.models_payload(session.conn, session.directory)
+            directories = [str(Path(m["file_path"]).parent)
+                           for m in known["models"] if m["file_path"]]
+            configured = os.environ.get("DYPRYS_MODEL_DIR", "")
+            directories += [part for part in configured.split(os.pathsep) if part]
+            directories.append(str(Path.home() / ".cache" / "qmd" / "models"))
+            return service.available_models(dict.fromkeys(directories))
+
+        return _json(await indexes.run(name, look))
+
     @app.get("/api/libraries/{name}/history")
     async def history(name: str, limit: int = 20):
         return _json(await indexes.run(

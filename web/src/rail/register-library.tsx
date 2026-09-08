@@ -115,7 +115,11 @@ export function RegisterLibrary({
               <Terminal className="size-3" />
               same as <code className="font-mono">dyp library add</code>
             </span>
-            <Button type="submit" size="sm" disabled={!name.trim() || !path.trim() || register.isPending}>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={!name.trim() || !path.trim() || register.isPending}
+            >
               {register.isPending ? "Registering…" : "Register"}
             </Button>
           </div>

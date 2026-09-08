@@ -511,3 +511,70 @@ def test_a_pattern_that_matches_nothing_is_still_a_404_inside_a_list(client, ind
 
     assert refused.status_code == 404
     assert "no-such-shelf" in refused.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# Choosing a model without typing a path
+# --------------------------------------------------------------------------
+
+
+def test_the_weights_on_this_machine_can_be_listed(client, index, tmp_path, monkeypatch):
+    """The reranker is the reason this exists.
+
+    Unlike the expander and summariser, whose choices the index remembers, a
+    cross-encoder must be named on every search and bare `--rerank` is an error
+    rather than a downgrade. A browser has no tab-completing path, so something
+    has to say what is there.
+    """
+    shelf = tmp_path / "weights"
+    (shelf / "nested").mkdir(parents=True)
+    (shelf / "reranker.gguf").write_bytes(b"x" * 11)
+    (shelf / "nested" / "embedder.gguf").write_bytes(b"y" * 22)
+    (shelf / "notes.txt").write_text("not a model")
+    monkeypatch.setenv("DYPRYS_MODEL_DIR", str(shelf))
+
+    found = client.get("/api/libraries/test/models/available").json()
+
+    names = {row["name"] for row in found["models"]}
+    assert names == {"reranker.gguf", "embedder.gguf"}, (
+        "one directory down is where models are commonly kept; a .txt is not a model")
+    assert {row["bytes"] for row in found["models"]} == {11, 22}
+    assert str(shelf) in found["searched"], "a caller cannot judge an empty list without this"
+
+
+def test_a_directory_that_is_not_there_is_not_an_error(client, monkeypatch, tmp_path):
+    """A picker opening is not the moment to fail over a stale config entry."""
+    monkeypatch.setenv("DYPRYS_MODEL_DIR", str(tmp_path / "gone"))
+
+    found = client.get("/api/libraries/test/models/available")
+
+    assert found.status_code == 200
+    assert found.json()["models"] == []
+
+
+def test_a_model_can_be_given_a_short_name(client):
+    """`hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9…` identifies weights exactly
+    and tells a person nothing. The alias is stored in the index, so a name
+    chosen in a browser is one `dyp --model` accepts in a terminal."""
+    named = client.post("/api/libraries/test/models/stub/alias", json={"alias": "quick"})
+
+    assert named.status_code == 200
+    assert named.json()["alias"] == "quick"
+    assert [m["alias"] for m in client.get("/api/libraries/test/models").json()["models"]] == ["quick"]
+
+
+def test_an_alias_that_is_a_path_is_refused(client):
+    """`--model` takes either, so an alias that looks like one is a trap."""
+    refused = client.post("/api/libraries/test/models/stub/alias",
+                          json={"alias": "/models/thing.gguf"})
+
+    assert refused.status_code == 400
+
+
+def test_naming_a_model_that_is_not_here_says_what_is(client):
+    """400 with the models to pick from — the same shape `model_ambiguous` has,
+    because the UI's job in both cases is to render a picker."""
+    missing = client.post("/api/libraries/test/models/nope/alias", json={"alias": "x"})
+
+    assert missing.status_code == 400
+    assert missing.json()["choices"] == ["stub"]

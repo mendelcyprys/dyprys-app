@@ -44,8 +44,8 @@ export function NotesDialog({
           {missing && (
             <p className="flex items-start gap-2 text-sm text-muted-foreground">
               <FileWarning className="mt-0.5 size-4 shrink-0" />
-              This library has no NOTES.md. That is not a problem — but if a search here teaches
-              you something the index cannot say, it belongs in one.
+              This library has no NOTES.md. That is not a problem — but if a search here teaches you
+              something the index cannot say, it belongs in one.
             </p>
           )}
           {notes.data && (

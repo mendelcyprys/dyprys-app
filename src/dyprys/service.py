@@ -1050,6 +1050,81 @@ def books_payload(conn, pattern: str | None = None) -> dict:
         for b in inspect(conn, pattern)]}
 
 
+# The extensions a local model is packaged as. One, today, and named rather
+# than inlined so the two places that scan agree about it.
+WEIGHTS_SUFFIX = ".gguf"
+
+
+def available_models(directories) -> dict:
+    """The model files on this machine, under directories the caller chose.
+
+    Which directories is the *frontend's* question — a terminal has a shell and
+    a tab-completing path, a browser has neither — so this takes them rather
+    than knowing where anyone keeps their weights.
+
+    The point is `--reranker`. Unlike the expander and summariser, whose choices
+    the index remembers, a reranker must be named on every search, and bare
+    `--rerank` is an error rather than a downgrade. "Type an absolute path each
+    time" is not a design in a browser, so something has to list what is there.
+
+    Nothing here guesses what a file *is*. A cross-encoder and a chat model are
+    both a .gguf, and the difference is not in the name; reporting a guess as a
+    fact would be worse than reporting nothing, because a chat model used as a
+    reranker rescores silently and plausibly.
+    """
+    seen: dict[str, dict] = {}
+    for directory in directories:
+        where = Path(directory).expanduser()
+        if not where.is_dir():
+            continue
+        # One level down as well: models are commonly kept one directory per
+        # model. Not deeper — this runs on every request that opens a picker.
+        for pattern in (f"*{WEIGHTS_SUFFIX}", f"*/*{WEIGHTS_SUFFIX}"):
+            for found in sorted(where.glob(pattern)):
+                try:
+                    size = found.stat().st_size
+                except OSError:
+                    continue
+                seen.setdefault(str(found), {
+                    "path": str(found), "name": found.name, "bytes": size,
+                    "directory": str(found.parent),
+                })
+    return {"models": sorted(seen.values(), key=lambda row: row["name"].lower()),
+            "searched": [str(Path(d).expanduser()) for d in directories]}
+
+
+def name_model(conn, wanted: str, alias: str) -> dict:
+    """Give a model a short name to type. The weights identity is unchanged.
+
+    `hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc` identifies weights
+    exactly and tells a person nothing, which is what the alias is for — and it
+    is stored in the index, so a name chosen in a browser is one the terminal
+    can type too.
+    """
+    chosen = (alias or "").strip()
+    if not chosen:
+        raise errors.BadRequest("an alias needs to be something")
+    if chosen.endswith(WEIGHTS_SUFFIX) or "/" in chosen:
+        raise errors.BadRequest(
+            f"{chosen!r} looks like a path; an alias is a short word to type "
+            f"in place of one")
+    row = db.find_model(conn, wanted)
+    if row is None:
+        raise errors.ModelMissing(
+            f"no model matches {wanted!r}",
+            choices=[m["name"] for m in
+                     conn.execute("SELECT name FROM models ORDER BY id")])
+    taken = conn.execute(
+        "SELECT name FROM models WHERE alias = ? AND id != ?",
+        (chosen, row["id"])).fetchone()
+    if taken is not None:
+        # The column is uniquely indexed, so this would otherwise surface as an
+        # IntegrityError -- a 500 for something the caller can fix.
+        raise errors.BadRequest(f"{chosen!r} is already {taken['name']}'s alias")
+    db.set_alias(conn, row["id"], chosen)
+    return {"name": row["name"], "alias": chosen}
+
+
 def models_payload(conn, directory) -> dict:
     """What has embedded this index, how far, and at what cost on disk."""
     from dyprys.library import models as inspect

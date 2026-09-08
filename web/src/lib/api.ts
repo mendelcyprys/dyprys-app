@@ -106,6 +106,32 @@ export interface BookRow {
   live_chunks: Record<string, number>;
 }
 
+export interface ModelRow {
+  name: string;
+  /** A short thing to type. Stored in the index, so the terminal knows it too. */
+  alias: string | null;
+  dim: number;
+  store: string;
+  embedded: number;
+  /** Chunks this model could embed — its own chunking, not the library's. */
+  live_chunks: number;
+  coverage: number;
+  disk_bytes: number;
+  failures: number;
+  carries: number;
+  routing: { profiled_books: number; stale_books: number };
+  file_path: string | null;
+  /** The index remembers these weights; they are no longer on this machine. */
+  file_present: boolean;
+}
+
+export interface WeightsFile {
+  path: string;
+  name: string;
+  bytes: number;
+  directory: string;
+}
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -123,8 +149,7 @@ export const api = {
   forget: (name: string) =>
     request<Libraries>(`/libraries/${encodeURIComponent(name)}`, { method: "DELETE" }),
 
-  makeDefault: (name: string) =>
-    post<Libraries>(`/libraries/${encodeURIComponent(name)}/default`),
+  makeDefault: (name: string) => post<Libraries>(`/libraries/${encodeURIComponent(name)}/default`),
 
   /** The library's NOTES.md, raw. Rendered, never interpreted. */
   notes: (name: string) => request<string>(`/libraries/${encodeURIComponent(name)}/notes`),
@@ -135,6 +160,25 @@ export const api = {
         pattern ? `?pattern=${encodeURIComponent(pattern)}` : ""
       }`,
     ),
+
+  models: (name: string) =>
+    request<{ models: ModelRow[] }>(`/libraries/${encodeURIComponent(name)}/models`),
+
+  /** The .gguf files on the machine, so a reranker can be picked not typed. */
+  availableModels: (name: string) =>
+    request<{ models: WeightsFile[]; searched: string[] }>(
+      `/libraries/${encodeURIComponent(name)}/models/available`,
+    ),
+
+  alias: (name: string, model: string, alias: string) =>
+    post<{ name: string; alias: string }>(
+      `/libraries/${encodeURIComponent(name)}/models/${encodeURIComponent(model)}/alias`,
+      { alias },
+    ),
+
+  /** Load a model before the first question, where the wait is expected. */
+  warm: (name: string, model?: string) =>
+    post<unknown>(`/libraries/${encodeURIComponent(name)}/warm`, model ? { model } : {}),
 
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
 

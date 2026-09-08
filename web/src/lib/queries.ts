@@ -33,8 +33,15 @@ export function useRegistryWrite() {
 
   return {
     register: useMutation({
-      mutationFn: ({ name, path, makeDefault }: { name: string; path: string; makeDefault?: boolean }) =>
-        api.register(name, path, makeDefault),
+      mutationFn: ({
+        name,
+        path,
+        makeDefault,
+      }: {
+        name: string;
+        path: string;
+        makeDefault?: boolean;
+      }) => api.register(name, path, makeDefault),
       onSuccess: seed,
     }),
     forget: useMutation({ mutationFn: api.forget, onSuccess: seed }),
@@ -55,5 +62,49 @@ export function useBooks(library: string | null, pattern: string) {
     queryFn: () => api.books(library!, pattern || undefined),
     enabled: Boolean(library),
     placeholderData: (previous) => previous,
+  });
+}
+
+export function useModels(library: string | null) {
+  return useQuery({
+    queryKey: ["models", library] as const,
+    queryFn: () => api.models(library!),
+    enabled: Boolean(library),
+  });
+}
+
+export function useAvailableModels(library: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["weights", library] as const,
+    queryFn: () => api.availableModels(library!),
+    enabled: Boolean(library) && enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useAlias(library: string) {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ model, alias }: { model: string; alias: string }) =>
+      api.alias(library, model, alias),
+    onSuccess: () => {
+      cache.invalidateQueries({ queryKey: ["models", library] });
+      cache.invalidateQueries({ queryKey: keys.libraries });
+    },
+  });
+}
+
+/**
+ * Load a model before the first question.
+ *
+ * Loading a 300 MB–1 GB GGUF is the dominant cost of the first search, and
+ * doing it when someone picks rather than when they ask moves the wait to where
+ * they expect one.
+ */
+export function useWarm(library: string | null) {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: (model?: string) => api.warm(library!, model),
+    onSuccess: () => cache.invalidateQueries({ queryKey: keys.health }),
   });
 }

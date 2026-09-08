@@ -1,12 +1,5 @@
 import * as React from "react";
-import {
-  Check,
-  ChevronsUpDown,
-  CircleSlash,
-  FolderPlus,
-  Star,
-  Trash2,
-} from "lucide-react";
+import { Check, ChevronsUpDown, CircleSlash, FolderPlus, Star, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -82,11 +75,7 @@ export function LibraryPicker({
 
       <PopoverContent className="w-[22rem] p-0">
         <Command>
-          <CommandInput
-            placeholder="Find a library…"
-            value={filter}
-            onValueChange={setFilter}
-          />
+          <CommandInput placeholder="Find a library…" value={filter} onValueChange={setFilter} />
           <CommandList>
             <CommandEmpty className="px-3 py-6 text-center text-sm text-muted-foreground">
               No library by that name.

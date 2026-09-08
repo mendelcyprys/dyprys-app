@@ -143,7 +143,7 @@ correct. Render those rows with an "outside your scope — exact phrase match"
 badge. Without it, the first person to notice will file it as a bug, and the
 second will stop trusting the scope.
 
-## Phase 3 — Models: which vectors answer, and where the files are
+## Phase 3 — Models: which vectors answer, and where the files are  ✅ built
 
 The Models tab plus the rail's model picker. `GET /models` gives `name`, `alias`,
 `dim`, `store`, `coverage`, `disk_bytes`, `failures`, `routing`, `file_path` and
@@ -248,14 +248,12 @@ open the stored answer. Then the `⌘K` palette, keyboard nav through results
 
 ## What the API still needs
 
-Everything above except these is already served. Worth agreeing before Phase 1,
-because two of them change `service`:
+Phases 1 to 3 are built and everything they needed has been added — registry
+writes, `collection` as a union, `GET /models/available`, and model aliases.
+What is left belongs to phases still to come:
 
 | need | phase | shape |
 |---|---|---|
-| register / forget a library | 1 | `POST`/`DELETE /api/libraries` — or a deliberate decision to leave it to the CLI |
-| choose a reranker without typing a path | 3 | `GET /api/models/available` listing `*.gguf` on the machine |
-| set a model alias | 3 | `POST /api/libraries/{name}/models/{model}/alias` |
 | cancel an in-flight search | 4 | the stream's disconnect is currently not observed; the worker runs on |
 | book table of contents | 4 | chapter offsets for a book, so the reader can jump |
 

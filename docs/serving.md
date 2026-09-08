@@ -30,6 +30,8 @@ GET    /api/libraries/{name}/status           totals, coverage, the notes path
 GET    /api/libraries/{name}/check?deep=      what drifted, what is outstanding
 GET    /api/libraries/{name}/books?pattern=   what is in the library
 GET    /api/libraries/{name}/models           what embedded it, how far
+GET    /api/libraries/{name}/models/available the .gguf files on this machine
+POST   /api/libraries/{name}/models/{m}/alias a short name to type
 GET    /api/libraries/{name}/history?limit=   embed runs and index operations
 GET    /api/libraries/{name}/asked?limit=&find=&which=
 GET    /api/libraries/{name}/notes            the library's NOTES.md, raw
@@ -161,6 +163,37 @@ prefix check is **not** equivalent and must not be substituted: symlinks, `..`,
 and a second library's files all pass one. Anything unlisted is a 404. `span` is
 capped at `service.MAX_SPAN` (200 KB) rather than refused, because a UI asking
 for too much should get what it may have.
+
+## Choosing a model
+
+`GET /models/available` lists the `.gguf` files on the machine, so a browser can
+offer them instead of asking for an absolute path.
+
+**It exists for `--reranker`.** The expander and summariser default to whatever
+the library last used, and the index stores it. The cross-encoder is not
+remembered anywhere, must be named on every search, and bare `rerank` is an
+error rather than a downgrade — so a browser needs somewhere to get one from,
+and a UI keeping it per library in `localStorage` is the whole of that design.
+
+Where to look is the **frontend's** question and is answered in `api.py`: the
+directories of weights this index already remembers (the likeliest home, and
+needing no configuration), `$DYPRYS_MODEL_DIR` for anywhere else, and
+`~/.cache/qmd/models`. One level down each, since models are commonly kept one
+directory per model. `searched` comes back with the list, because an empty
+result is only readable next to where it looked.
+
+Nothing here guesses what a file *is*. A cross-encoder and a chat model are both
+a `.gguf` and the difference is not in the name; a guess reported as a fact
+would be worse than nothing, since a chat model used as a reranker rescores
+silently and plausibly.
+
+`POST /models/{model}/alias` gives a model a short name.
+`hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc` identifies weights exactly
+and tells a person nothing. The alias is stored in the index rather than the
+client, so one chosen in a browser is one `dyp --model` accepts in a terminal.
+An alias that looks like a path is refused — `--model` takes either, so the
+confusion is real — and so is one already belonging to another model, which the
+unique index would otherwise raise as a 500.
 
 ## Jobs
 

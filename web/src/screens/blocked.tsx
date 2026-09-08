@@ -45,15 +45,15 @@ export function RegistryUnreadable({ path }: { path: string }) {
       <p className="text-sm text-muted-foreground">
         A registry file exists at the path below and could not be parsed, so the names of every
         library are unavailable. This is not the same as having none registered, and nothing here
-        will overwrite it — a write sets it aside as{" "}
-        <code className="font-mono">*.unreadable</code> first, so what is in it stays recoverable
-        by hand.
+        will overwrite it — a write sets it aside as <code className="font-mono">*.unreadable</code>{" "}
+        first, so what is in it stays recoverable by hand.
       </p>
       <pre className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs">
         {path}
       </pre>
       <p className="text-sm text-muted-foreground">
-        Every library still opens by path in a terminal: <code className="font-mono">dyp --data DIR status</code>.
+        Every library still opens by path in a terminal:{" "}
+        <code className="font-mono">dyp --data DIR status</code>.
       </p>
     </Screen>
   );
@@ -64,8 +64,8 @@ export function NothingRegistered() {
     <Screen>
       <h1 className="text-lg font-semibold">No libraries yet</h1>
       <p className="text-sm text-muted-foreground">
-        A library is a directory holding an index over your own texts. Name one you already have,
-        or build a new one from a folder of <code className="font-mono">.txt</code> files in a
+        A library is a directory holding an index over your own texts. Name one you already have, or
+        build a new one from a folder of <code className="font-mono">.txt</code> files in a
         terminal.
       </p>
       <div className="flex items-center gap-3">

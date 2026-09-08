@@ -71,8 +71,8 @@ export function Scope({ onEdit }: { onEdit: () => void }) {
         // result from outside the scope with a correct-looking citation is read
         // as a bug the first time and as an untrustworthy scope the second.
         <p className="text-[10px] leading-snug text-muted-foreground">
-          An exact phrase is still searched library-wide — those results are
-          labelled where they appear.
+          An exact phrase is still searched library-wide — those results are labelled where they
+          appear.
         </p>
       )}
     </div>
