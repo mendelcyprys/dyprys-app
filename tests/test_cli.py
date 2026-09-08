@@ -162,7 +162,7 @@ def test_every_result_carries_a_cosine_even_when_only_bm25_found_it(tmp_path):
     import numpy as np
 
     from dyprys import db as _db
-    from dyprys.cli import _searcher
+    from dyprys.service import _pipeline
     from dyprys.embed import store_for
     from dyprys.lexical import backfill
     from tests.conftest import DIM, StubEmbedder
@@ -186,7 +186,7 @@ def test_every_result_carries_a_cosine_even_when_only_bm25_found_it(tmp_path):
     store.flush()
     backfill(conn)
 
-    run = _searcher(conn, store, embedder, model, "hybrid", None)
+    run = _pipeline(conn, store, embedder, model, "hybrid", None)
     hits = run("Paragraph 7 concerning neurons", 5)
 
     assert hits, "the fixture should return something"
@@ -336,9 +336,9 @@ def test_progress_leaves_what_it_printed_on_the_screen(monkeypatch, capsys):
     read. Nothing is erased now, and nothing writes cursor-control codes — a
     captured log used to be full of `[K`.
     """
-    from dyprys import cli
+    from dyprys.progress import Stderr
 
-    stages = cli.Stages(on=True)
+    stages = Stderr(on=True)
     stages.note("routed to 5 of 3,453 books")
     stages.note("Principles of Neural Science", indent=1)
     stages.working("drafting …")
@@ -352,9 +352,9 @@ def test_progress_leaves_what_it_printed_on_the_screen(monkeypatch, capsys):
 
 def test_progress_can_be_silenced(capsys):
     """`-q` is for scripts; the commentary is on stderr but still noise there."""
-    from dyprys import cli
+    from dyprys.progress import Stderr
 
-    cli.Stages(on=False).note("routed to", "somewhere")
+    Stderr(on=False).note("routed to", "somewhere")
 
     assert capsys.readouterr().err == ""
 
@@ -458,7 +458,7 @@ def test_watch_follows_one_model_not_the_sum_of_all(tmp_path):
     already-embedded library reported more progress than there was work.
     """
     from dyprys import db as _db
-    from dyprys.cli import _model_being_embedded
+    from dyprys.embed import model_in_progress as _model_being_embedded
     from dyprys.ingest import ingest_paths
 
     library = tmp_path / "lib"
@@ -516,19 +516,21 @@ def test_an_empty_query_is_refused_before_any_search(tmp_path, capsys):
     words, so hybrid search returns whatever the vector half drifts to. Refuse it
     rather than present noise as answers at exit 0."""
     from dyprys import db as _db
-    from dyprys.cli import _ask, build_parser
+    from dyprys.cli import main
     from dyprys.ingest import ingest_paths
 
     book = tmp_path / "b.txt"
     book.write_text("Paragraph about neurons. " * 400, encoding="utf-8")
     conn = _db.connect(tmp_path / "ix")
     ingest_paths(conn, [book])
-
-    for blank in ("", "   ", "\t \n"):
-        args = build_parser().parse_args(["ask", blank])
-        assert _ask(conn, tmp_path / "ix", args) == 2
-    assert "empty query" in capsys.readouterr().err
     conn.close()
+
+    # Through `main`, because the refusal is now two halves: `service.search`
+    # raises `EmptyQuery` and the one handler in `main` turns that into a
+    # sentence and an exit code. Either half alone proves nothing.
+    for blank in ("", "   ", "\t \n"):
+        assert main(["--data", str(tmp_path / "ix"), "ask", blank]) == 2
+    assert "empty query" in capsys.readouterr().err
 
 
 def test_a_padded_query_is_stripped_not_rejected(tmp_path):
@@ -718,20 +720,29 @@ def test_the_next_step_sees_a_model_that_is_not_the_furthest_ahead(tmp_path, cap
 
 def test_the_model_name_an_error_suggests_can_be_pasted_back(tmp_path, capsys):
     """A middle-elided name is not a name: pasted back it resolves to nothing."""
+    import pytest
+
     from dyprys import db as _db
-    from dyprys.cli import _handle, _weights_for
+    from dyprys import errors
+    from dyprys.service import _weights_for
+    from dyprys.term import handle as _handle
 
     data, _ = _split_two_ways(tmp_path, capsys)
     conn = _db.connect(tmp_path / "ix")
     _db.model_id(conn, "second-model@bbbbbbbbbbbb", 8)
 
-    _, problem = _weights_for(conn, None)
-    assert problem and "2 models" in problem
+    with pytest.raises(errors.ModelAmbiguous) as refused:
+        _weights_for(conn, None)
+    problem = refused.value.message
+    assert "2 models" in problem
 
     for row in conn.execute("SELECT name, alias FROM models").fetchall():
         handle = _handle(row["name"], row["alias"])
         assert "…" not in handle, f"{handle!r} cannot be typed"
         assert handle in problem, "the error must offer the handle that works"
+        # The same handles as data, so a UI can offer the picker that unblocks
+        # the user instead of asking them to read the prose.
+        assert handle in refused.value.choices
         assert _db.find_model(conn, handle) is not None, f"{handle!r} resolves to nothing"
     conn.close()
 

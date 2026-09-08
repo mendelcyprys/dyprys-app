@@ -33,7 +33,15 @@ else:
 
 
 class AlreadyRunning(RuntimeError):
-    pass
+    """Someone else holds this index.
+
+    Not a `DyprysError`: this module is imported by things that must not depend
+    on the error hierarchy, and it predates it. It carries the same `kind` slug
+    so a frontend translating failures does not have to special-case it —
+    `errors` re-exports the class, and the HTTP layer turns it into a 409.
+    """
+
+    kind = "already_running"
 
 
 def holder(directory: Path, what: str = "embed") -> int | None:

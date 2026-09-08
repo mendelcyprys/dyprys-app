@@ -13,7 +13,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# httpx is what starlette.testclient drives the app through; it is a test
+# dependency of the api extra, not of the server.
+dev = ["pytest>=8", "httpx2"]
+# The HTTP frontend, and nothing the CLI needs. `dyp serve` imports these
+# lazily and says `pip install 'dyprys[api]'` when they are absent, so core
+# `dyp` keeps its two runtime dependencies.
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "pydantic>=2"]
 
 [project.scripts]
 dyp = "dyprys.cli:main"

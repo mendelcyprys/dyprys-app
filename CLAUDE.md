@@ -240,4 +240,5 @@ read them pre-emptively; each is a lookup for one kind of work.
 | `docs/indexing.md` | building a new index — `add`, `embed`, chunk size, choosing a model, spotting bad extraction |
 | `docs/libraries.md` | several libraries or models, backup/restore, moving text, model-by-weights and `--verify` |
 | `docs/maintenance.md` | `check`, removing books, compaction, and exactly what each command keeps vs removes |
+| `docs/serving.md` | `dyp serve` — the HTTP API, its payloads, jobs and status codes |
 | `docs/troubleshooting.md` | an error string or symptom — a lookup table from what you saw to what to do |

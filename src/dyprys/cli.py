@@ -11,12 +11,20 @@ import time
 from pathlib import Path
 
 from dyprys import db
+from dyprys import embed as embed_mod
+from dyprys import errors
+from dyprys import service
 from dyprys import term
 from dyprys import text as text_mod
 from dyprys.chunker import OVERLAP_BYTES, TARGET_BYTES
 from dyprys.check import survey
 from dyprys.ingest import ingest_paths
+from dyprys.progress import Stderr
 from dyprys.routing import DEFAULT_BOOKS
+from dyprys.service import default_model, results_as_json
+from dyprys.term import handle as _handle
+from dyprys.term import shorten as _shorten
+from dyprys.term import size as _size
 
 # Why a result came back without its text. The three reasons need three
 # different actions, and the one message they used to share named none of them.
@@ -27,7 +35,7 @@ _WHY_NO_TEXT = {
 }
 
 
-# Eighteen commands listed alphabetically tell a new reader nothing about which
+# Nineteen commands listed alphabetically tell a new reader nothing about which
 # three they need today. argparse cannot group subcommands, so the flat listing
 # is replaced by this, ordered by when in a library's life you reach for it.
 COMMAND_GROUPS = """\
@@ -57,6 +65,8 @@ commands, in the order a library needs them
   more than one         library  name and switch between indexes
                         backup   wrap an index and its text into one archive
                         restore  unpack one into an empty directory
+
+  from a browser        serve    the same searches over HTTP, for a web UI
 
 `dyp COMMAND --help` for the flags of any of these.
 """
@@ -340,8 +350,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="re-hash every file instead of trusting size and mtime",
     )
 
+    sv = sub.add_parser("serve", help="the same searches over HTTP, for a web UI")
+    sv.add_argument("--host", default="127.0.0.1",
+                    help="interface to bind (default 127.0.0.1 — this machine only)")
+    sv.add_argument("--port", type=int, default=8765, help="port (default 8765)")
+    sv.add_argument("--origin", action="append", metavar="URL",
+                    help="allow a browser origin to call this server; repeatable "
+                         "(default http://localhost:5173, which is Vite's)")
+    sv.add_argument("--web", type=Path, metavar="DIR",
+                    help="also serve a built frontend from DIR — optional, and "
+                         "the API is fully usable without one")
+    sv.add_argument("--keep", type=int, default=2, metavar="N",
+                    help="warm embedding models to hold per library (default 2). "
+                         "Each is 300 MB to 1 GB resident.")
+
     # The grouped epilog above is the listing; argparse's own flat one would
-    # print all eighteen a second time. The per-command `help=` strings are kept
+    # print all nineteen a second time. The per-command `help=` strings are kept
     # rather than SUPPRESSed, so shell completion and any other tool reading the
     # parser still sees them.
     listing = getattr(sub, "_choices_actions", None)
@@ -358,9 +382,51 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
+    # The one place a typed failure becomes an exit code. Scattered
+    # `print(...); return 2` was how this used to be said, which meant the
+    # wording and the code were decided together in twenty places and could not
+    # be reused by anything that is not a terminal. A second handler anywhere
+    # below here would be a second opinion about what a failure means.
+    try:
+        return _dispatch(args, parser)
+    except errors.DyprysError as failed:
+        print(_explain(failed), file=sys.stderr)
+        return failed.exit_code
+
+
+# What this terminal can add to a refusal that the layer raising it could not.
+# `service` knows a model is missing; only a frontend knows which environment
+# variable names one here, and only a frontend can afford the network round trip
+# that lists what ollama has installed.
+_ROLE_PROSE = {
+    "expander": ("expansion", "--expand", "DYPRYS_EXPANDER", True),
+    "summariser": ("summariser", "--summarise", "DYPRYS_SUMMARISER", True),
+    "reranker": ("reranker", "--reranker", "DYPRYS_RERANKER", False),
+}
+
+
+def _explain(failed: errors.DyprysError) -> str:
+    """The message, plus the suggestions only a command line can make."""
+    if isinstance(failed, errors.OptionalModelMissing):
+        role, flag, env, chat = _ROLE_PROSE[failed.role]
+        return _no_model_for(role, flag, env, chat=chat)
+    lines = [failed.message]
+    if failed.role == "model":
+        lines.append("$DYPRYS_MODEL names one for this shell.")
+    if failed.hint:
+        lines.append(failed.hint)
+    return "\n".join(lines)
+
+
+def _dispatch(args, parser) -> int:
     if args.command == "library":
         return _library(args, parser)
+    if args.command == "serve":
+        return _serve(args)
 
+    # Resolved once, into a local. `_where` used to be called here and eight
+    # more times below, which was harmless while it exited the process and is
+    # not once it raises: the failure has to happen inside the guarded region.
     where = _where(args)
     # Only these can bring an index into being. Everything else asking for one
     # that is not there means a wrong path, a stale library entry, or a drive
@@ -388,27 +454,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "asked":
             return _asked(conn, args)
         if args.command == "watch":
-            return _watch(conn, _where(args), args.every, args.wait)
+            return _watch(conn, where, args.every, args.wait)
         if args.command == "status":
-            return _status(conn, args.json, _where(args))
+            return _status(conn, args.json, where)
         if args.command == "check":
             return _check(conn, args.deep, args.json)
         if args.command == "embed":
-            return _embed(conn, _where(args), args)
+            return _embed(conn, where, args)
         if args.command == "ask":
-            return _ask(conn, _where(args), args)
+            return _ask(conn, where, args)
         if args.command == "eval":
-            return _eval(conn, _where(args), args)
+            return _eval(conn, where, args)
         if args.command == "books":
             return _books(conn, args.pattern, args.json)
         if args.command == "models":
-            return _models(conn, _where(args), args)
+            return _models(conn, where, args)
         if args.command == "lexical":
             return _lexical(conn)
         if args.command == "route":
-            return _route(conn, _where(args), args)
+            return _route(conn, where, args)
         if args.command == "backup":
-            return _backup(conn, _where(args), args)
+            return _backup(conn, where, args)
         if args.command == "restore":
             return _restore(args)
         if args.command == "relocate":
@@ -416,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "remove":
             return _remove(conn, args)
         if args.command == "compact":
-            return _compact(conn, _where(args), args)
+            return _compact(conn, where, args)
     finally:
         conn.close()
     return 0
@@ -678,10 +744,7 @@ def _embed(conn, directory, args) -> int:
                   file=sys.stderr)
         return 1
 
-    model_path, why = _weights_for(conn, args.model)
-    if model_path is None:
-        print(why, file=sys.stderr)
-        return 2
+    model_path = service._weights_for(conn, args.model or os.environ.get("DYPRYS_MODEL"))
 
     from dyprys.embed import embed_pending, store_for
     from dyprys.embedder import Embedder
@@ -840,32 +903,15 @@ def _clock(seconds: float) -> str:
 
 
 def _where(args) -> Path:
-    """Which index this command acts on.
+    """Which index this command acts on, from what was typed and this shell.
 
-    An explicit path wins, then a name given on the command line, then whichever
-    library was made the default, and only then the ./data fallback. Explicit
-    always beats remembered, so a stale default can never silently redirect a
-    command that named its target.
+    Nothing here but the translation. The precedence -- explicit path, then a
+    name, then the default library, then ./data -- lives in `service` so the API
+    follows the same one; this supplies the two things only a command line knows,
+    which are the parsed arguments and the environment it was launched in.
     """
-    from dyprys import registry
-
-    if args.data:
-        return Path(args.data)
-    if getattr(args, "library", None):
-        found = registry.resolve(args.library)
-        if found is None:
-            if not registry.readable():
-                raise SystemExit(
-                    f"the registry at {registry.registry_path()} could not be read, "
-                    f"so no name resolves. Open the index directly with --data DIR."
-                )
-            raise SystemExit(f"no library named {args.library!r}; try `dyp library list`")
-        return found
-    if not os.environ.get("DYPRYS_DATA"):
-        default = registry.resolve(None)
-        if default is not None:
-            return default
-    return db.data_dir(None)
+    return service.resolve_index(
+        library=getattr(args, "library", None), data=args.data, env=os.environ)
 
 
 def _sources_under(index_dir: Path) -> str | None:
@@ -947,23 +993,7 @@ def _library(args, parser) -> int:
     entries = registry.libraries()
 
     if getattr(args, "json", False):
-        libs = []
-        for e in entries:
-            note = notes_path(e.path) if e.exists else None
-            row = {"name": e.name, "path": str(e.path), "default": e.is_default,
-                   "exists": e.exists, "notes": str(note) if note else None}
-            held = registry.summarise(e.path) if e.exists else None
-            if held is not None:
-                row.update(books=held.books, chunks=held.chunks, models=[
-                    {"name": name, "embedded": done, "total": whole,
-                     "coverage": (done / whole) if whole else 0.0}
-                    for name, done, whole in held.models])
-            libs.append(row)
-        return _emit_json({
-            "libraries": libs,
-            "registry_path": str(registry.registry_path()),
-            "registry_readable": not damaged,
-        })
+        return _emit_json(service.libraries_payload())
 
     if not entries:
         if damaged:
@@ -1101,47 +1131,15 @@ def _local(stamp: str) -> str:
     return when.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
-# A run's two clocks never agree to the second; only a gap worth reading is one
-# the machine actually slept through.
-SLEPT_AT_LEAST = 60
-
-
-def _asleep(run) -> float:
-    """Seconds this run spent with the machine asleep, or 0 if not knowable.
-
-    `seconds` is monotonic and stops while the machine sleeps; `wall_seconds`
-    does not. Their difference is the sleep, and it is the only way to tell a
-    run that worked for thirty minutes from one that was begun thirty minutes of
-    work ago -- which on a laptop are routinely hours apart.
-    """
-    try:
-        wall = run["wall_seconds"]
-    except (IndexError, KeyError):
-        return 0.0
-    if wall is None:
-        return 0.0
-    gap = wall - run["seconds"]
-    return gap if gap >= SLEPT_AT_LEAST else 0.0
-
-
 def _asked(conn, args) -> int:
     """What was asked before, and what it produced."""
     import json
 
-    def as_row(row):
-        return {"id": row["id"], "at": row["at"], "question": row["question"],
-                "mode": row["mode"], "ms": row["ms"],
-                "detail": json.loads(row["detail"])}
-
     if getattr(args, "json", False) and not args.forget:
         # A read of the question log, so --forget (which writes) is not a --json
         # operation. One question if numbered, else the list.
-        allrows = db.questions_asked(conn, limit=10 ** 9)
-        if args.which is not None:
-            one = next((r for r in allrows if r["id"] == args.which), None)
-            return _emit_json(as_row(one)) if one else (_emit_json(None) or 1)
-        rows = db.questions_asked(conn, args.limit, args.find)
-        return _emit_json({"questions": [as_row(r) for r in rows]})
+        payload = service.asked_payload(conn, args.limit, args.find, args.which)
+        return _emit_json(payload) or (0 if payload is not None else 1)
 
     if args.forget:
         what = args.forget.lower()
@@ -1237,24 +1235,7 @@ def _history(conn, limit: int, as_json: bool = False) -> int:
         "ORDER BY r.id DESC LIMIT ?", (limit,)).fetchall()
 
     if as_json:
-        total = conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(seconds),0), COALESCE(SUM(embedded),0) "
-            "FROM embed_runs").fetchone()
-        return _emit_json({
-            "events": [
-                {"at": e["at"], "action": e["action"], "detail": e["detail"]}
-                for e in reversed(events)],
-            "runs": [
-                {"started_at": r["started_at"], "seconds": r["seconds"],
-                 "wall_seconds": (r["wall_seconds"] if "wall_seconds" in r.keys() else None),
-                 "embedded": r["embedded"], "copied": r["copied"], "failed": r["failed"],
-                 "rate": (r["embedded"] / r["seconds"]) if r["seconds"] else 0.0,
-                 "stopped": r["stopped"], "model": r["name"],
-                 "asleep_seconds": _asleep(r)}
-                for r in reversed(runs)],
-            "totals": {"runs": total[0], "seconds": total[1], "chunks": total[2],
-                       "mean_rate": (total[2] / total[1]) if total[1] else 0.0},
-        })
+        return _emit_json(service.history_payload(conn, limit))
 
     if events:
         print(f"what has been done to this index (most recent {len(events)})")
@@ -1278,7 +1259,7 @@ def _history(conn, limit: int, as_json: bool = False) -> int:
             extra += f"  +{r['copied']:,} carried"
         if r["failed"]:
             extra += f"  {r['failed']:,} failed"
-        asleep = _asleep(r)
+        asleep = service.asleep_seconds(r)
         if asleep:
             extra += f"  {_clock(asleep)} asleep"
         print(f"{_local(r['started_at']):<20} {_clock(r['seconds']):>9} "
@@ -1296,32 +1277,6 @@ def _history(conn, limit: int, as_json: bool = False) -> int:
             print(f"  median {rate:.1f}/s for {_shorten(m['name'])}"
                   f"  — what `dyp check` estimates from")
     return 0
-
-
-def _model_being_embedded(conn):
-    """The model a running embed is most likely working on.
-
-    The lock records a pid, not a model, so this is inferred: the model with
-    work left in the chunking it is bound to. With one model that is trivially
-    the right answer; with two it picks the unfinished one, which is the only
-    one an embed could be running for.
-    """
-    best = None
-    for m in conn.execute("SELECT id, name, chunking_id FROM models ORDER BY id"):
-        if m["chunking_id"] is None:
-            live = conn.execute(
-                "SELECT COALESCE(SUM(chunk_count), 0) FROM segments").fetchone()[0]
-        else:
-            live = conn.execute(
-                "SELECT COALESCE(SUM(chunk_count), 0) FROM segments WHERE chunking_id = ?",
-                (m["chunking_id"],)).fetchone()[0]
-        done = conn.execute(
-            "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress WHERE model_id = ?",
-            (m["id"],)).fetchone()[0]
-        left = live - done
-        if left > 0 and (best is None or left > best[0]):
-            best = (left, m["id"], m["name"], m["chunking_id"])
-    return None if best is None else (best[1], best[2], best[3])
 
 
 def _await_embed(directory, grace: float, tick: float = 0.25):
@@ -1375,7 +1330,7 @@ def _watch(conn, directory, every: float, wait: float = 0.0) -> int:
     # Which model is being embedded. Summing progress across all of them counted
     # a finished model's work toward a running one's total, so a second model
     # embedding into a library the first had completed showed over 100% done.
-    following = _model_being_embedded(conn)
+    following = embed_mod.model_in_progress(conn)
     if following is None:
         print("nothing outstanding for any model here.", file=sys.stderr)
         return 1
@@ -1383,25 +1338,7 @@ def _watch(conn, directory, every: float, wait: float = 0.0) -> int:
     if conn.execute("SELECT COUNT(*) FROM models").fetchone()[0] > 1:
         print(f"following {_shorten(model_name)}\n", file=sys.stderr)
 
-    def totals():
-        if chunking_id is None:
-            live = conn.execute(
-                "SELECT COALESCE(SUM(chunk_count), 0) FROM segments").fetchone()[0]
-        else:
-            live = conn.execute(
-                "SELECT COALESCE(SUM(chunk_count), 0) FROM segments "
-                "WHERE chunking_id = ?", (chunking_id,)).fetchone()[0]
-        done = conn.execute(
-            "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress "
-            "WHERE model_id = ?", (model_id,)).fetchone()[0]
-        row = conn.execute(
-            "SELECT b.title, p.n_embedded, seg.chunk_count FROM segment_progress p "
-            "JOIN segments seg ON seg.id = p.segment_id "
-            "JOIN sources src ON src.id = seg.source_id "
-            "JOIN books b ON b.id = src.book_id "
-            "WHERE p.model_id = ? AND p.n_embedded > 0 "
-            "AND p.n_embedded < seg.chunk_count LIMIT 1", (model_id,)).fetchone()
-        return live, done, row
+    totals = lambda: embed_mod.progress_of(conn, model_id, chunking_id)
 
     live_display = _stderr_is_tty()
     painted = False
@@ -1455,154 +1392,31 @@ def _duration(text: str | None) -> float | None:
     return float(text)
 
 
-def _weights_for(conn, model_arg):
-    """Where to load weights from: a path, a remembered model, or nothing.
-
-    The index already records the file name, size and digest of the weights that
-    made its vectors, and now where they were last opened. So the common case --
-    one model, still on this machine -- needs no argument at all.
-    """
-    given = model_arg or os.environ.get("DYPRYS_MODEL")
-    if given and Path(given).exists():
-        return given, None
-
-    row = db.find_model(conn, given) if given else db.sole_model(conn)
-    if row is None:
-        if given:
-            return None, (f"no model matches {given!r}, and it is not a file. "
-                          f"`dyp models` lists what this index knows.")
-        rows = conn.execute("SELECT name, alias FROM models ORDER BY id").fetchall()
-        if len(rows) > 1:
-            # Listing them here costs one query we have already made and saves
-            # the round trip through `dyp models` -- and any unique substring
-            # of a name works, so the whole name never has to be typed.
-            choices = "\n".join(
-                f"  --model {_handle(r['name'], r['alias'])!r}" for r in rows)
-            return None, (f"this index has {len(rows)} models — say which with "
-                          f"--model:\n{choices}\n"
-                          f"any unique part of a name works; "
-                          f"`dyp models --name NAME ALIAS` sets a short one.")
-        return None, ("no model yet: pass --model PATH.gguf or set $DYPRYS_MODEL. "
-                      "It is remembered after the first run.")
-
-    remembered = row["file_path"]
-    if remembered and Path(remembered).exists():
-        # A hint, not a promise. Size is the cheap half of the check; the digest
-        # is the real one and happens on load, where wrong weights register as a
-        # different model rather than quietly polluting this one.
-        size = Path(remembered).stat().st_size
-        if row["file_bytes"] and size != row["file_bytes"]:
-            return None, (f"the weights remembered at {remembered} are "
-                          f"{_size(size)}, not the {_size(row['file_bytes'])} that "
-                          f"made these vectors. Pass --model explicitly.")
-        return remembered, None
-    where = f" (last seen at {remembered})" if remembered else ""
-    return None, (f"this index needs {row['file_name'] or row['name']}{where}, "
-                  f"which is not on this machine now.\n"
-                  f"pass --model PATH.gguf; `dyp models --needed` shows how to "
-                  f"verify a candidate.")
-
-
-def _load_model(conn, directory, model_arg):
-    """Open the model named on the command line and its vector file."""
-    path, why = _weights_for(conn, model_arg)
-    if path is None:
-        print(why, file=sys.stderr)
-        return None
-    from dyprys.embed import store_for
-    from dyprys.embedder import Embedder
-
-    embedder = Embedder(path)
-    # An index whose vectors were truncated needs its queries truncated to
-    # match. Without this the model row says 512, the embedder says 768, and
-    # every command refuses to open the index it just shrank.
-    known = conn.execute("SELECT dim FROM models WHERE name = ?",
-                         (embedder.name,)).fetchone()
-    if known and known["dim"] < embedder.dim:
-        from dyprys.embedder import Truncated
-
-        embedder = Truncated(embedder, known["dim"])
-    model_id = db.model_id(
-        conn, embedder.name, embedder.dim, provenance=embedder.provenance()
-    )
-    db.remember_weights(conn, model_id, Path(path).resolve())
-    return embedder, model_id, store_for(conn, directory, model_id, embedder.dim)
-
-
-def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, cosine):
-    """The `--json` payload, built from resolved passages and nothing else.
-
-    Kept a pure function so it can be tested without a model or an index: it turns
-    what a search already produced into the shape an agent parses. `text` is null
-    when the source could not be proved, and `state` says why; `provenance` is the
-    tool's own rank signal ("vec 1 · phrase 1"), which carries more than a single
-    fused score could.
-    """
-    results = []
-    for rank, p in enumerate(passages, 1):
-        results.append({
-            "rank": rank,
-            "chunk_id": p.chunk_id,
-            "book": p.title,
-            "chapter": (p.chapter + 1) if p.chapter else None,
-            "path": str(p.path),
-            "offset": p.offset,
-            "cos": round(cosine[p.chunk_id], 4) if p.chunk_id in cosine else None,
-            "provenance": why.get(p.chunk_id),
-            "state": p.state,
-            "text": p.text,
-        })
-    return {
-        "query": question,
-        "mode": mode,
-        "routed": routed,
-        "scanned_fraction": round(scanned, 4),
-        "elapsed_ms": round(elapsed_ms, 1),
-        "results": results,
-    }
-
-
 def _ask(conn, directory, args) -> int:
-    # An empty or whitespace query embeds to a meaningless vector and matches no
-    # words, so hybrid search returns whatever the vector half drifts to -- noise
-    # presented as answers, at exit 0. Refuse it instead.
-    args.question = args.question.strip()
-    if not args.question:
-        print("empty query — give something to search for", file=sys.stderr)
-        return 2
-    loaded = _load_model(conn, directory, args.model)
-    if loaded is None:
-        return 2
-    embedder, model_id, store = loaded
-    from dyprys.search import flat_search, resolve, scanned_fraction, scope_books
+    """Search, then show what came back. The searching is `service.search`.
 
-    books = None
-    if args.collection:
-        books = scope_books(conn, args.collection)
-        if not books:
-            print(f"no book matches {args.collection!r}; try `dyp books`", file=sys.stderr)
-            return 1
+    What is left here is the part that is genuinely a terminal's: which 700
+    characters of a 3,500-byte passage to show, where to wrap, what to mark, and
+    which of two messages an empty result deserves.
+    """
+    stages = Stderr(not args.quiet)
+    options = _options(conn, args)
 
-    router, problem = _router(conn, directory, embedder, model_id, args.route, books)
-    if problem:
-        return 2
-    reranker, missing = _load_reranker(args, conn)
-    if missing:
-        return 2
-    expander, missing = _load_expander(args, conn)
-    if missing:
-        print(missing, file=sys.stderr)
-        return 2
+    # A missing summariser is not a failed search. The passages are the result
+    # and a draft is a reading of them, so this is said *after* them, where it
+    # has always been said, rather than refusing the search.
+    no_summariser = bool(options.summarise) and not options.summariser
+    if no_summariser or getattr(args, "json", False):
+        # `--json` has never summarised: `_ask` returned from its JSON branch
+        # before the summariser ran, and `results_as_json` has no field to put an
+        # answer in. Dropped in one visible place rather than halfway down a
+        # search that has already cost the seconds.
+        options.summarise = None
 
-    stages = Stages(not args.quiet)
-    started = time.time()
-    search = _searcher(conn, store, embedder, model_id, args.mode, books, router,
-                       reranker, args.rerank or args.depth or 0, args.dedupe,
-                       expander, stages)
-    hits = search(args.question, args.k)
-    elapsed = (time.time() - started) * 1000
-    reached = router.last.get("books") if router else books
-    share = scanned_fraction(conn, model_id, reached)
+    # Not `open_session`: the connection belongs to `main`, which closes it.
+    result = service.search(service.Session(directory, conn), args.question,
+                            options, stages)
+    passages, why, cosine = result.passages, result.why, result.cosine
 
     # The machine-readable form. An agent driving dyp parses this instead of
     # scraping the human display, which carries ANSI codes and middle-elided
@@ -1611,23 +1425,19 @@ def _ask(conn, directory, args) -> int:
     if getattr(args, "json", False):
         import json as _json
         payload = results_as_json(
-            args.question, args.mode, bool(args.route), share, elapsed,
-            resolve(conn, hits), search.why, search.cosine)
+            result.question, result.mode, result.routed, result.scanned_fraction,
+            result.elapsed_ms, passages, why, cosine)
         print(_json.dumps(payload, ensure_ascii=False, indent=2))
         return 0 if payload["results"] else 1
 
-    if not hits:
-        embedded = conn.execute(
-            "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress WHERE model_id = ?",
-            (model_id,)).fetchone()[0]
-        if not embedded:
+    if not passages:
+        if result.nothing_embedded:
             print("nothing embedded yet — run `dyp embed` first", file=sys.stderr)
         else:
             # A genuinely empty result on an embedded index: vector search always
             # returns something, so this is a lexical-only mode finding no words.
             print("no passage matched", file=sys.stderr)
         return 1
-    passages = resolve(conn, hits)
     for rank, p in enumerate(passages, 1):
         where = term.bold(p.title) + (
             term.dim(f", chapter {p.chapter + 1}") if p.chapter else "")
@@ -1636,10 +1446,10 @@ def _ask(conn, directory, args) -> int:
         # 3%, and two passages that each led one half tie exactly. The rank each
         # half gave it is the real basis for the order, and it says whether the
         # passage was found because it *means* the query or *contains* it.
-        why = search.why.get(p.chunk_id) or "—"
-        cos = search.cosine.get(p.chunk_id)
+        mark = why.get(p.chunk_id) or "—"
+        cos = cosine.get(p.chunk_id)
         strength = f"cos {cos:.2f} · " if cos is not None else ""
-        print(f"\n{term.bold(str(rank) + '.')} {term.dim('[' + strength + why + ']')} "
+        print(f"\n{term.bold(str(rank) + '.')} {term.dim('[' + strength + mark + ']')} "
               f"{where}  {term.dim('(chunk ' + str(p.chunk_id) + ')')}")
         if p.text is None:
             print("   " + _WHY_NO_TEXT.get(p.state, "(source unavailable; run `dyp check`)"))
@@ -1669,37 +1479,25 @@ def _ask(conn, directory, args) -> int:
                                     subsequent_indent="   ")
             print(term.mark(wrapped, wanted))
             print(term.dim(f"   {_where_to_look(p.path, at)}"))
-    if getattr(args, "summarise", None):
-        _summarise(args, passages, conn, stages, search)
 
+    if result.answer:
+        _show_answer(result.answer)
+    elif no_summariser:
+        print("\n" + _no_model_for("summariser", "--summarise", "DYPRYS_SUMMARISER"),
+              file=sys.stderr)
+
+    reached = result.routed_books
     if args.route:
         # "of the vectors", not "of the corpus": an exact phrase is still looked
         # up across the whole lexical index, which is what keeps a remembered
         # sentence findable when stage 1 would have routed past its book.
-        scope = f"{len(reached)} routed book(s), {share:.1%} of the vectors"
-    elif books:
-        scope = f"{len(books)} book(s), {share:.1%} of the vectors"
+        scope = (f"{len(reached)} routed book(s), "
+                 f"{result.scanned_fraction:.1%} of the vectors")
+    elif reached:
+        scope = f"{len(reached)} book(s), {result.scanned_fraction:.1%} of the vectors"
     else:
         scope = "the whole embedded corpus"
-    print(f"\n{elapsed:.1f} ms, {args.mode} over {scope}", file=sys.stderr)
-
-    # Kept for the person, not for the search. A question worth asking twice
-    # should not have to be reconstructed from memory, and a good answer should
-    # be findable again — `dyp asked`.
-    db.record_question(conn, args.question, args.mode, elapsed, {
-        "routed": bool(router),
-        "books": len(reached) if reached else None,
-        "models": {k: v for k, v in (
-            ("embed", _shorten(embedder.name)),
-            ("expander", getattr(expander, "model", None) if expander else None),
-            ("summariser", _last_summariser.get("model")),
-        ) if v},
-        "expansion": _last_expansion.get("lines") or None,
-        "hits": [{"chunk": p.chunk_id, "title": p.title, "path": p.path,
-                  "offset": p.offset, "cos": round(search.cosine.get(p.chunk_id, 0.0), 3),
-                  "why": search.why.get(p.chunk_id)} for p in passages],
-        "answer": _last_summariser.get("answer"),
-    })
+    print(f"\n{result.elapsed_ms:.1f} ms, {args.mode} over {scope}", file=sys.stderr)
     return 0
 
 
@@ -1805,10 +1603,7 @@ def _compact(conn, directory, args) -> int:
 
 def _route(conn, directory, args) -> int:
     """Build stage 1. Re-runnable; replaces whatever was there."""
-    loaded = _load_model(conn, directory, args.model)
-    if loaded is None:
-        return 2
-    embedder, model_id, store = loaded
+    embedder, model_id, store = _model(conn, directory, args)
     from dyprys.routing import build_centroids
 
     started = time.time()
@@ -1836,28 +1631,6 @@ def _route(conn, directory, args) -> int:
     return 0
 
 
-def _load_reranker(args, conn=None):
-    """The cross-encoder, or None when reranking was not asked for."""
-    if not args.rerank:
-        return None, None
-    path = resolve_model(conn, "reranker", "DYPRYS_RERANKER", args.reranker)
-    if not path or not Path(path).exists():
-        print(_no_model_for("reranker", "--reranker", "DYPRYS_RERANKER", chat=False),
-              file=sys.stderr)
-        return None, "missing"
-    from dyprys.rerank import Reranker
-
-    print(f"loading {Path(path).name} …", file=sys.stderr)
-    return Reranker(path), None
-
-
-# Whether a rewritten query is also given to BM25. It is not, and the reason is
-# the same one that already sends an exact phrase past the router: a phrase is a
-# lookup, not a ranking, and a lookup cannot be improved by rewording the thing
-# being looked up. Measured -- see the docstring of `dyprys.expand`.
-EXPAND_LEXICAL = False
-
-
 # How much of a passage to print. A chunk averages 3,534 bytes; showing 400 of
 # them was 11% and always ended in an ellipsis, so nothing said whether the
 # passage stopped there or the display did. `--full` prints the whole thing.
@@ -1869,44 +1642,6 @@ def _stderr_is_tty() -> bool:
         return sys.stderr.isatty()
     except (AttributeError, ValueError):
         return False
-
-
-# Filled by the stages that produce them, read once when the question is
-# recorded. Module-level rather than threaded through five signatures, because
-# every one of those signatures belongs to something that should not have to
-# know a history exists.
-_last_expansion: dict = {}
-_last_summariser: dict = {}
-_retried: dict = {}
-
-
-class Stages:
-    """Says what each stage did, on stderr, and leaves it on the screen.
-
-    An expanded and summarised query takes ten seconds or more, and silence for
-    ten seconds is indistinguishable from a hang. An earlier version wrote a
-    transient line and erased it, which meant the interesting part -- the
-    rephrasing the model chose, the books routing picked -- flashed past and was
-    gone. Nothing is erased now: every line is something worth having kept.
-
-    stderr, so `dyp ask ... > results.txt` still captures only results.
-    """
-
-    def __init__(self, on: bool = True):
-        self.on = bool(on)
-
-    def note(self, label: str, detail: str = "", *, indent: int = 0) -> None:
-        if not self.on:
-            return
-        pad = "  " + "    " * indent
-        if detail:
-            print(f"{pad}{term.dim(label + ':')} {detail}", file=sys.stderr)
-        else:
-            print(f"{pad}{term.dim(label)}", file=sys.stderr)
-
-    def working(self, message: str) -> None:
-        """Announced before a slow stage, so the wait has a name."""
-        self.note(message)
 
 
 def _where_to_look(path: str, offset: int) -> str:
@@ -1921,115 +1656,39 @@ def _where_to_look(path: str, offset: int) -> str:
     return f"{shown}:{offset}"
 
 
-def _widen(passages):
-    """Passages re-read with context, and where each chunk sits inside its window.
-
-    A chunk boundary is a byte budget, so a passage handed to a model often
-    begins mid-sentence and it copies the fragment. The span is kept so a quote
-    can be told apart from one taken out of the margin either side.
-    """
-    import dataclasses
-
-    widened, spans = [], {}
-    for p in passages:
-        if p.text is None:
-            widened.append(p)
-            continue
-        length = len(p.text.encode())
-        window = text_mod.read_window(p.path, p.offset, length)
-        if not window:
-            widened.append(p)
-            continue
-        text, at = window
-        widened.append(dataclasses.replace(p, text=text, offset=at))
-        head = len(text.encode()[: p.offset - at].decode("utf-8", errors="ignore"))
-        spans[p.chunk_id] = (head, head + len(text[head:].encode()[:length]
-                                              .decode("utf-8", errors="ignore")))
-    return widened, spans
-
-
-def _summarise(args, passages, conn=None, stages=None, search=None) -> None:
-    """Draft an answer from what was found, and show only what checks out.
+def _show_answer(summary) -> None:
+    """Show a drafted answer, and everything that did not check out.
 
     Printed after the passages, never instead of them. The passages are the
     result; this is a reading of them, and a reading that cannot be verified is
     worth less than the list it was drawn from.
     """
-    from dyprys import summarise as summarise_mod
-    from dyprys.summarise import NO_ANSWER, ask_ollama, summarise
+    from dyprys.summarise import NO_ANSWER
 
-    model = resolve_model(conn, "summariser", "DYPRYS_SUMMARISER",
-                          args.summarise if isinstance(args.summarise, str) else None)
-    if not model:
-        print("\n" + _no_model_for("summariser", "--summarise", "DYPRYS_SUMMARISER"),
-              file=sys.stderr)
-        return
-
-    # The model reads the same widened passages the reader sees, so a chunk cut
-    # mid-sentence does not become a fragment it has to guess around. Verifying
-    # against the widened text is still exact: it is the text that was shown,
-    # read from the file at a recorded byte.
-    import dataclasses
-
-    widened, spans = _widen(passages)
-
-    talk = lambda p: ask_ollama(model, p)
-    answer = summarise(args.question, widened, talk)
-
-    # A refusal means the *search* failed, not that the library lacks an answer,
-    # and a failed search can be tried with other words. This costs nothing when
-    # the first attempt works, and only ever runs when the alternative is
-    # nothing at all. One retry: a model that cannot find it twice is telling
-    # you something, and a loop here would spend minutes proving it.
-    if answer.prose.strip() == NO_ANSWER and search is not None:
-        if stages:
-            stages.note("nothing here answers it — asking the same model for "
-                        "other words")
-        other = summarise_mod.rephrase(args.question, talk)
-        if other:
-            if stages:
-                stages.note("trying instead", other, indent=1)
-            from dyprys.search import resolve as _resolve
-            again = _resolve(conn, search(other, args.k))
-            widened, spans = _widen(again)
-            second = summarise(args.question, widened, talk)
-            if second.prose.strip() != NO_ANSWER:
-                answer, passages = second, again
-                _retried["question"] = other
-            else:
-                _retried["failed"] = other
-                # The retry's passages are discarded, so the widened set must go
-                # back to the ones on screen: a citation has to name something
-                # the reader can see.
-                widened, spans = _widen(passages)
-    _last_summariser.update(model=model, retried=_retried.get("question"), answer={
-        "prose": answer.prose.strip(),
-        "verified": [{"cited": c.cited, "quote": c.quote, "where": c.location}
-                     for c in answer.verified],
-        "rejected": [{"cited": c.cited, "quote": c.quote} for c in answer.rejected]})
+    answer, widened, spans = summary.answer, summary.widened, summary.spans
     print("\n" + term.rule())
-    if _retried.get("question"):
-        print(term.dim(f"the passages above did not answer, so the library was "
-                       f"searched again for:"))
-        print(f"  {term.bold(_retried['question'])}\n")
-        for rank, p in enumerate(passages, 1):
+    if summary.retried:
+        print(term.dim("the passages above did not answer, so the library was "
+                       "searched again for:"))
+        print(f"  {term.bold(summary.retried)}\n")
+        for rank, p in enumerate(summary.passages, 1):
             print(f"{term.bold(str(rank) + '.')} {term.bold(p.title)}"
                   f"  {term.dim('(chunk ' + str(p.chunk_id) + ')')}")
             print(term.dim(f"   {_where_to_look(p.path, p.offset)}"))
         print()
     if not answer.prose.strip():
-        print(f"{model} returned nothing; the passages above are unaffected.",
+        print(f"{summary.model} returned nothing; the passages above are unaffected.",
               file=sys.stderr)
         return
     if answer.prose.strip() == NO_ANSWER:
         print("the model reports that these passages do not answer the question.")
-        if _retried.get("failed"):
-            print(term.dim(f"  it was asked again for “{_retried['failed']}”, "
+        if summary.failed:
+            print(term.dim(f"  it was asked again for \u201c{summary.failed}\u201d, "
                            f"and found nothing there either."))
         return
 
     print(answer.prose.strip())
-    print(term.dim(f"\n— drafted by {model} —"))
+    print(term.dim(f"\n— drafted by {summary.model} —"))
     if answer.verified:
         print(term.bold("\nchecked against the source:"))
         for claim in answer.verified:
@@ -2084,252 +1743,20 @@ def _no_model_for(role: str, flag: str, env: str, chat: bool = True) -> str:
     return "\n".join(lines)
 
 
-def _load_expander(args, conn=None):
-    """The expansion model, or None when expansion was not asked for.
-
-    Returns `(expander, missing)` like `_load_reranker`, so a missing model is
-    reported by the caller rather than raising out of the middle of a search.
-    """
-    asked = getattr(args, "expand", None)
-    if not asked:
-        return None, None
-    # `--expand gemma3:4b` names the model inline, as `--summarise` does;
-    # `--expander` stays as the older spelling.
-    named = resolve_model(
-        conn, "expander", "DYPRYS_EXPANDER",
-        (asked if isinstance(asked, str) else None) or getattr(args, "expander", None))
-    if not named:
-        return None, _no_model_for("expansion", "--expand", "DYPRYS_EXPANDER")
-    # A path to weights we load ourselves; anything else is a name for the local
-    # ollama server, which owns each model's chat template. Guessing a template
-    # is how the reranker was made worse than no reranker at all.
-    if named.endswith(".gguf") or Path(named).exists():
-        from dyprys.expand import Expander
-
-        return Expander(named), None
-    from dyprys.expand import OllamaExpander
-
-    expander = OllamaExpander(named, prompt=os.environ.get("DYPRYS_PROMPT", "full"))
-    problem = expander.unavailable()
-    return (None, problem) if problem else (expander, None)
-
-
-def _searcher(conn, store, embedder, model_id, mode, books, router=None,
-              reranker=None, depth=0, dedupe=False, expander=None, stages=None):
-    """One callable per mode, so ask and eval cannot drift apart.
-
-    `router` narrows the books per query, which is stage 1. It applies to the
-    vector half and to BM25's OR-of-words ranking, but *not* to BM25's exact
-    phrase attempt, which searches the library whole -- see `search_bm25`. So
-    the reported scanned fraction is the share of the *vectors* read, and the
-    output says so.
-    """
-    from dyprys.lexical import reciprocal_rank_fusion, search_bm25
-    from dyprys.search import flat_search
-
-    def run(question, k):
-        # Expansion first, because everything below may be run several times
-        # over. Routing still sees the question as asked: stage 1 picking books
-        # from a rewritten query is a separate change with its own measurement,
-        # and mixing the two would leave neither attributable.
-        note = stages.note if stages else (lambda *a, **k: None)
-        working = stages.working if stages else (lambda _m: None)
-        expansion = None
-        if expander:
-            working(f"rephrasing with {getattr(expander, 'model', 'a model')} …")
-            expansion = expander.expand(question)
-            _last_expansion["lines"] = {
-                "vector": list(expansion.vector), "hyde": list(expansion.hyde),
-                "lexical": list(expansion.lexical)}
-            for kind, lines in (("as a question", expansion.vector),
-                                ("as an answer", expansion.hyde),
-                                ("as keywords", expansion.lexical)):
-                for line in lines:
-                    note(kind, line[:120], indent=1)
-            if expansion.empty:
-                note("nothing usable came back; searching as asked", indent=1)
-        vector = embedder.embed_query(question)
-        scope = router(question, vector) if router else books
-        if router and scope:
-            total = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
-            titles = [r["title"] for r in conn.execute(
-                "SELECT title FROM books WHERE id IN (%s)" % ",".join("?" * len(scope)),
-                sorted(scope))]
-            note(f"routed to {len(scope)} of {total:,} books")
-            for title in titles:
-                note(title[:76], indent=1)
-        # Retrieval fetches a deeper shortlist when something downstream will
-        # thin or reorder it; recall@depth of this list is the ceiling on what
-        # reranking can reach.
-        #
-        # Depth is deliberately independent of the reranker. Tying the two
-        # together made an arm change two things at once -- a reranked run
-        # retrieved deeper *and* reordered -- and the two are separable: jina's
-        # recall@1 is 63/110 at depth 5 and 67/110 at depth 20 with no reranker
-        # at all, because RRF fuses however many candidates each half returned.
-        # Crediting that +4 to the reranker overstated it, and did so in the
-        # direction the measurement was hoping for.
-        want = max(k, depth)
-        # Over-fetch when a filter will thin the list, or it cannot return k.
-        if dedupe:
-            want = max(want, k * 4)
-        # The query as asked leads each half, and leads the fused list, because
-        # RRF breaks ties in favour of the earlier ranking. A rewrite is a guess
-        # about what was meant; it may add an answer the original missed, but it
-        # does not get to overrule the original on a tie.
-        by_vector, by_words = [], []
-        origin: dict[int, str] = {}
-        if mode in ("vector", "hybrid"):
-            by_vector.append(flat_search(conn, store, vector, model_id, want, book_ids=scope))
-        if mode in ("lexical", "hybrid"):
-            by_words.append(search_bm25(conn, question, want, model_id=model_id,
-                                        book_ids=scope, origin=origin))
-
-        if expansion and not expansion.empty:
-            if mode in ("vector", "hybrid"):
-                # A rewritten question is a query; a hypothetical answer is a
-                # passage. EmbeddingGemma is trained with a different prefix for
-                # each, and the model's own line kinds say which is which.
-                for phrase in expansion.vector:
-                    by_vector.append(flat_search(
-                        conn, store, embedder.embed_query(phrase), model_id, want, book_ids=scope))
-                for passage in expansion.hyde:
-                    by_vector.append(flat_search(
-                        conn, store, embedder.embed_documents([passage])[0],
-                        model_id, want, book_ids=scope))
-            if mode in ("lexical", "hybrid") and EXPAND_LEXICAL:
-                for phrase in expansion.lexical:
-                    by_words.append(search_bm25(
-                        conn, phrase, want, model_id=model_id, book_ids=scope))
-
-        # Each half is fused down to ONE ranking before the halves meet, so the
-        # balance between them does not depend on how many phrasings the model
-        # happened to emit for each. Handing fusion four vector lists and two
-        # lexical ones is a 2:1 vector weight arrived at by accident, and a
-        # deliberate 1.3x weight was already measured to cost 24 of 30
-        # exact-phrase probes. The first version did exactly that, and lexical
-        # safety fell 18/20 -> 13/20 on two separate question sets.
-        def fused(rankings):
-            rankings = [r for r in rankings if r]
-            if not rankings:
-                return []
-            if len(rankings) == 1:
-                return rankings[0]
-            return reciprocal_rank_fusion(rankings, k=want)
-
-        vector_side, lexical_side = fused(by_vector), fused(by_words)
-        sides = [r for r in (vector_side, lexical_side) if r]
-        shortlist = sides[0] if len(sides) == 1 else reciprocal_rank_fusion(sides, k=want)
-
-        if reranker:
-            working(f"rescoring {min(len(shortlist), want)} passages …")
-            from dyprys.rerank import rerank
-            shortlist = rerank(conn, reranker, question, shortlist[:want], max(k * 4, k))
-        if dedupe:
-            from dyprys.search import drop_near_duplicates
-            shortlist = drop_near_duplicates(conn, shortlist, k)
-        found = shortlist[:k]
-        # Attached rather than returned, so `eval` and every other caller keep
-        # the same signature. Same pattern as `router.last`.
-        from dyprys.lexical import provenance
-        # "phrase" and "words" rather than one "bm25": an exact-phrase hit and a
-        # keyword-overlap hit are different kinds of answer, and the reader is
-        # the one who knows which they wanted.
-        run.why = provenance(
-            [n for n in (("vec", vector_side), ("bm25", lexical_side)) if n[1]],
-            found, rename={"bm25": origin})
-        # Cosine for *every* result, including the ones only BM25 found — k dot
-        # products against vectors already on disk. A literal match with a low
-        # cosine is worth seeing: it says the passage contains your words without
-        # being about them, which is exactly when a keyword hit misleads.
-        run.cosine = {}
-        for hit in found:
-            try:
-                run.cosine[hit.chunk_id] = float(store.read(hit.chunk_id) @ vector)
-            except (IndexError, ValueError):
-                pass
-        return found
-
-    run.why, run.cosine = {}, {}
-    return run
-
-
-def _router(conn, directory, embedder, model_id, books_wanted, candidates):
-    """Stage 1 as a callable, or None when routing was not asked for."""
-    if not books_wanted:
-        return None, None
-    from dyprys.routing import is_built, profile_gap, route
-    from dyprys.vectors import VectorStore
-
-    if not is_built(conn, model_id):
-        print("no routing profile yet — run `dyp route`", file=sys.stderr)
-        return None, "missing"
-
-    # A book embedded since the last `dyp route` has no centroids, so stage 1
-    # can never choose it. The search still returns k results and exits 0, so
-    # without this line the omission is invisible -- the one failure mode a
-    # reader has no way to detect from the output.
-    unprofiled = profile_gap(conn, model_id).unprofiled
-    if unprofiled:
-        print(f"--route cannot reach {unprofiled} book(s) embedded since the last "
-              f"`dyp route`; run it to include them.", file=sys.stderr)
-
-    total = conn.execute(
-        "SELECT COALESCE(SUM(centroid_count), 0) FROM book_centroids WHERE model_id = ?",
-        (model_id,),
-    ).fetchone()[0]
-    centroids = VectorStore(db.centroids_path(directory, model_id), embedder.dim, total)
-    last: dict = {}
-
-    def go(question, vector):
-        chosen = {b for b, _ in route(conn, centroids, vector, model_id, books_wanted, candidates)}
-        last["books"] = chosen
-        return chosen
-
-    go.last = last
-    return go, None
-
-
-def _size(n: int) -> str:
-    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
-        if n >= scale:
-            return f"{n / scale:.1f} {unit}"
-    return f"{n} B"
-
-
 def _books(conn, pattern=None, as_json: bool = False) -> int:
     """The library, or one book in full."""
     from dyprys.library import books as inspect
 
     found = inspect(conn, pattern)
+    if as_json:
+        # Empty is a valid listing, not an error, so the shape is the same
+        # either way and only the exit code says whether anything matched.
+        return _emit_json(service.books_payload(conn, pattern)) or (0 if found else 1)
     if not found:
-        if as_json:
-            return _emit_json({"books": []}) or 1
         where = f" matching {pattern!r}" if pattern else ""
         print(f"no books{where} — run `dyp add`" if not pattern else f"no book matches {pattern!r}",
               file=sys.stderr)
         return 1
-
-    if as_json:
-        return _emit_json({"books": [
-            {
-                "title": b.title,
-                "key": str(b.key),
-                "chunks": b.chunks,
-                "lexical_indexed": b.lexical,
-                "sources": [
-                    {"ordinal": s.ordinal, "path": str(s.path),
-                     "size_bytes": s.size_bytes, "present": s.present}
-                    for s in b.sources],
-                "chunkings": [
-                    {"id": c.id, "target": c.target, "overlap": c.overlap,
-                     "chunks": c.chunks} for c in b.chunkings],
-                "embedded": dict(b.per_model),
-                # The denominator that goes with `embedded`, per model: this
-                # book's chunks under the one chunking that model embeds.
-                "live_chunks": {name: b.live_for(name) for name in b.per_model},
-            }
-            for b in found]})
 
     if pattern:
         for book in found:
@@ -2469,11 +1896,6 @@ OPTIONAL_ROLES = (
 )
 
 
-def default_model(conn, role: str) -> str | None:
-    """The model remembered for `role` in this index, if any."""
-    return db.get_meta(conn, f"model.{role}") if conn is not None else None
-
-
 def resolve_model(conn, role: str, env: str, explicit=None) -> str | None:
     """Which model to use: what was typed, else the environment, else the index.
 
@@ -2485,6 +1907,46 @@ def resolve_model(conn, role: str, env: str, explicit=None) -> str | None:
     if isinstance(explicit, str) and explicit:
         return explicit
     return os.environ.get(env) or default_model(conn, role)
+
+
+def _model(conn, directory, args):
+    """The embedding model this command names, or the one the index remembers."""
+    return service.load_model(conn, directory,
+                              args.model or os.environ.get("DYPRYS_MODEL"))
+
+
+def _options(conn, args) -> service.SearchOptions:
+    """argparse's namespace as the dataclass both frontends share.
+
+    The environment is read here and nowhere below. `--expand` and `--summarise`
+    are `bool | str` -- argparse declares them `nargs="?", const=True`, so bare
+    means "whatever this library remembers" and a value names a model -- and
+    that shape has to survive the crossing intact or the two frontends drift on
+    their very first flag.
+    """
+    asked = getattr(args, "summarise", None)
+    return service.SearchOptions(
+        k=args.k,
+        mode=args.mode,
+        model=args.model or os.environ.get("DYPRYS_MODEL"),
+        collection=args.collection,
+        route=args.route,
+        rerank=args.rerank or 0,
+        depth=getattr(args, "depth", 0) or 0,
+        reranker=resolve_model(conn, "reranker", "DYPRYS_RERANKER",
+                               getattr(args, "reranker", None)),
+        expand=getattr(args, "expand", None),
+        expander=resolve_model(conn, "expander", "DYPRYS_EXPANDER",
+                               getattr(args, "expander", None)),
+        summarise=asked,
+        summariser=resolve_model(
+            conn, "summariser", "DYPRYS_SUMMARISER",
+            asked if isinstance(asked, str) else None),
+        dedupe=getattr(args, "dedupe", False),
+        full=getattr(args, "full", False),
+        prompt=os.environ.get("DYPRYS_PROMPT", "full"),
+    )
+
 
 
 def ollama_models(host: str = "http://localhost:11434", timeout: float = 0.7) -> list[str]:
@@ -2576,31 +2038,11 @@ def _models(conn, directory, args) -> int:
             return _set_default_model(conn, key, chosen)
 
     found = inspect(conn, directory)
+    if getattr(args, "json", False):
+        return _emit_json(service.models_payload(conn, directory)) or (0 if found else 1)
     if not found:
-        if getattr(args, "json", False):
-            return _emit_json({"models": []}) or 1
         print("no embedding model registered yet — run `dyp embed`", file=sys.stderr)
         return 1
-
-    if getattr(args, "json", False):
-        return _emit_json({"models": [
-            {
-                "name": m.name,
-                "alias": m.alias,
-                "dim": m.dim,
-                "store": m.quantisation,
-                "embedded": m.embedded,
-                "live_chunks": m.live_chunks,
-                "coverage": m.coverage,
-                "disk_bytes": m.bytes_on_disk,
-                "failures": m.failures,
-                "carries": m.carries,
-                "routing": {"profiled_books": m.centroid_books,
-                            "stale_books": m.stale_books},
-                "file_path": m.file_path,
-                "file_present": bool(m.file_path) and Path(m.file_path).exists(),
-            }
-            for m in found]})
 
     if args.needed:
         return _models_needed(conn)
@@ -2762,10 +2204,7 @@ def _models(conn, directory, args) -> int:
 
 
 def _eval(conn, directory, args) -> int:
-    loaded = _load_model(conn, directory, args.model)
-    if loaded is None:
-        return 2
-    embedder, model_id, store = loaded
+    embedder, model_id, store = _model(conn, directory, args)
     from dyprys.evaluate import evaluate, lexical_safety, load_questions
 
     if not args.questions.exists():
@@ -2780,17 +2219,14 @@ def _eval(conn, directory, args) -> int:
         print(f"no book matches {args.collection!r}", file=sys.stderr)
         return 1
 
-    router, problem = _router(conn, directory, embedder, model_id, args.route, books)
-    if problem:
-        return 2
-
-    reranker, missing = _load_reranker(args, conn)
-    if missing:
-        return 2
-    expander, missing = _load_expander(args, conn)
-    if missing:
-        print(missing, file=sys.stderr)
-        return 2
+    stages = Stderr(not getattr(args, "quiet", False))
+    router, unreachable = service._router(conn, directory, embedder, model_id,
+                                          args.route, books)
+    for advisory in unreachable:
+        print(advisory.message, file=sys.stderr)
+    options = _options(conn, args)
+    reranker = service._reranker_for(conn, options, stages)
+    expander = service._expander_for(conn, options)
 
     # --rerank N implies depth N; --depth N asks for the same shortlist with no
     # reordering, which is the arm that separates the two.
@@ -2798,8 +2234,8 @@ def _eval(conn, directory, args) -> int:
     modes = ("vector", "lexical", "hybrid") if args.compare else (args.mode,)
     results = {}
     for mode in modes:
-        run = _searcher(conn, store, embedder, model_id, mode, books, router,
-                        reranker, depth, args.dedupe, expander)
+        run = service._pipeline(conn, store, embedder, model_id, mode, books, router,
+                                reranker, depth, args.dedupe, expander)
         touched: list[float] = []
 
         def measured(question, k, _run=run):
@@ -2819,9 +2255,9 @@ def _eval(conn, directory, args) -> int:
         # which passage led the flat list, so the number stopped meaning what its
         # label says. And it is the whole diagnostic's cost: reranking it doubled
         # a routed --rerank eval, 50 minutes to 112.
-        unrouted = _searcher(conn, store, embedder, model_id, mode, books, None,
-                             None, depth, args.dedupe,
-                             expander) if router else None
+        unrouted = service._pipeline(conn, store, embedder, model_id, mode, books,
+                                     None, None, depth, args.dedupe,
+                                     expander) if router else None
         rep = evaluate(
             conn, store, embedder, model_id, questions, k=args.k, search_fn=measured,
             scanned=scanned_fraction(conn, model_id, books),
@@ -2920,51 +2356,10 @@ def _eval(conn, directory, args) -> int:
 
 def _check(conn, deep: bool, as_json: bool = False) -> int:
     """Report drift and outstanding work. Never fixes anything by itself."""
-    report = survey(conn, deep=deep)
-
     if as_json:
-        from dyprys.routing import is_built, profile_gap
+        return _emit_json(service.check_payload(conn, deep))
 
-        def routing_for(name):
-            row = conn.execute("SELECT id FROM models WHERE name = ?", (name,)).fetchone()
-            if not row or not is_built(conn, row["id"]):
-                return {"built": False, "stale_books": None,
-                        "drifted_books": None, "unprofiled_books": None}
-            gap = profile_gap(conn, row["id"])
-            # `unprofiled` is the one worth branching on: those books cannot be
-            # returned under --route at all, where a drifted one still can.
-            return {"built": True, "stale_books": gap.total,
-                    "drifted_books": gap.drifted, "unprofiled_books": gap.unprofiled}
-
-        return _emit_json({
-            "deep": deep,
-            "sources": report.sources,
-            "drift": {
-                "missing": report.drift.missing,
-                "changed": report.drift.changed,
-                "intact": report.drift.intact,
-                "clean": report.drift.clean,
-            },
-            "live_chunks": report.live_chunks,
-            "dead_chunks": report.dead_chunks,
-            "lexical_chunks": report.lexical_chunks,
-            "lexical_complete": report.lexical_chunks == report.live_chunks,
-            "garbled": [
-                {"title": g.title, "chunks": g.chunks, "p90_token": g.p90_token}
-                for g in report.garbled],
-            # Distinct from `garbled`: those have unusable text, these have none.
-            "empty": [
-                {"title": e.title, "key": e.key, "bytes_on_disk": e.bytes_on_disk}
-                for e in report.empty],
-            "models": [
-                {"name": m.name, "dim": m.dim, "embedded": m.embedded,
-                 "to_copy": m.to_copy, "to_embed": m.to_embed, "failed": m.failed,
-                 "outstanding": m.outstanding,
-                 "coverage": (m.embedded / (m.embedded + m.outstanding))
-                 if (m.embedded + m.outstanding) else 0.0,
-                 "routing": routing_for(m.name)}
-                for m in report.models],
-        })
+    report = survey(conn, deep=deep)
 
     how = "re-hashed" if deep else "checked by size and mtime"
     print(f"{report.sources:,} source files, {how}")
@@ -3083,6 +2478,12 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
 
 
 def _status(conn, as_json: bool = False, directory=None) -> int:
+    if as_json:
+        return _emit_json(service.status_payload(conn, directory))
+
+    from dyprys.compact import interrupted
+    from dyprys.library import notes_path
+
     books, sources, chunks, text_bytes = conn.execute(
         "SELECT (SELECT COUNT(*) FROM books), "
         "       (SELECT COUNT(*) FROM sources), "
@@ -3110,32 +2511,9 @@ def _status(conn, as_json: bool = False, directory=None) -> int:
         if m["chunking_id"] is not None else chunks
         for m in model_rows
     }
-    from dyprys.compact import interrupted
-    from dyprys.library import notes_path
     carries = conn.execute("SELECT COUNT(*) FROM chunk_carry").fetchone()[0]
     fails = conn.execute("SELECT COUNT(*) FROM chunk_failures").fetchone()[0]
     notes = notes_path(directory) if directory else None
-
-    if as_json:
-        return _emit_json({
-            "books": books, "sources": sources, "chunks": chunks,
-            "text_bytes": text_bytes,
-            "chunkings": [
-                {"id": c["id"], "target": c["target"], "overlap": c["overlap"],
-                 "chunks": c["n"]} for c in chunkings_rows],
-            "models": [
-                {"name": m["name"], "dim": m["dim"], "embedded": m["done"],
-                 "live_chunks": live_for[m["id"]],
-                 "coverage": (m["done"] / live_for[m["id"]])
-                 if live_for[m["id"]] else 0.0}
-                for m in model_rows],
-            "pending_carries": carries,
-            "failed_chunks": fails,
-            "compaction_interrupted": interrupted(conn),
-            # Null unless the owner left one. Read it before searching: it holds
-            # what the index cannot tell you about the corpus in it.
-            "notes": str(notes) if notes else None,
-        })
 
     print(f"books      {books:>12,}")
     print(f"sources    {sources:>12,}")
@@ -3196,6 +2574,47 @@ def _status(conn, as_json: bool = False, directory=None) -> int:
     return 0
 
 
+def _serve(args) -> int:
+    """Run the HTTP frontend until interrupted.
+
+    Imported here rather than at the top of the module because FastAPI and
+    uvicorn are an optional extra: core `dyp` has two runtime dependencies and
+    someone who never opens a browser should not install a web framework to run
+    a search.
+
+    Binds 127.0.0.1 by default. There is no authentication — this is one
+    person's library on one machine — so binding a public interface would put
+    an unauthenticated file reader on the network.
+    """
+    try:
+        import uvicorn
+
+        from dyprys.api import create_app
+    except ImportError as missing:
+        print(f"`dyp serve` needs the web extras ({missing.name} is not installed).",
+              file=sys.stderr)
+        print("  pip install 'dyprys[api]'   — or  uv pip install -e '.[api]'",
+              file=sys.stderr)
+        return 2
+
+    web = args.web
+    if web and not Path(web).is_dir():
+        # Said rather than crashed. There is no `web/` scaffold in this repo, so
+        # a wrong path here is a likely mistake and the API alone is still the
+        # whole product.
+        print(f"no directory at {web} — serving the API only", file=sys.stderr)
+        web = None
+    app = create_app(origins=args.origin, web=web, keep=args.keep)
+    where = f"http://{args.host}:{args.port}"
+    print(f"dyprys on {where}", file=sys.stderr)
+    print(f"  {where}/api/libraries   ·   {where}/docs", file=sys.stderr)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"  bound to {args.host}: anyone who can reach it can read this "
+              f"library, and there is no password.", file=sys.stderr)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def _emit_json(payload) -> int:
     """Print a payload as JSON and succeed.
 
@@ -3225,23 +2644,6 @@ def _rerank_depth(value: str) -> int:
         raise argparse.ArgumentTypeError(
             f"expected a number of candidates to rescore, got {value!r}{hint}"
         ) from None
-
-
-def _shorten(name: str, width: int = 34) -> str:
-    """Model names are long paths or hub ids; keep the identifying tail."""
-    return name if len(name) <= width else "…" + name[-(width - 1) :]
-
-
-def _handle(name: str, alias: str | None = None) -> str:
-    """Something you can actually type for `--model`.
-
-    Not `_shorten`: that elides the middle to fit a column, and an elided
-    name is not a name -- pasted back it matches nothing. Any unique
-    substring resolves, so drop the @digest and keep an identifying tail.
-    """
-    if alias:
-        return alias
-    return name.split("@")[0][-28:] if "@" in name else name
 
 
 if __name__ == "__main__":
