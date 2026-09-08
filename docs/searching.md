@@ -42,6 +42,7 @@ see what each contributes.
 dyp ask "..." -k 10          # return N passages (default 5). Read several.
 dyp ask "..." --route        # ~6x faster; reads ~1% of the library
 dyp ask "..." -c PATTERN     # scope to books whose title/path matches (glob ok)
+dyp ask "..." -c A -c B      # several -c are a union — a list picked by hand
 dyp ask "..." --full         # whole passage, not just its query-dense part
 dyp ask "..." --json         # machine-readable (schema below)
 dyp ask "..." -q             # results only, no stderr commentary
@@ -52,7 +53,11 @@ dyp ask "..." --rerank --reranker FILE.gguf  # cross-encoder reorder (~9s)
 
 `--route` costs about one answer in twenty-five for a ~6x speedup — use it for a
 quick look, drop it when the answer matters more than the second it saves. `-c`
-matching nothing returns nothing (exit 1), never a silent full-library search.
+matching nothing returns nothing (exit 1), never a silent full-library search —
+and that holds for **each** pattern of a union, not just for all of them
+together. A mistyped pattern beside a good one contributes no books and changes
+no result, so it would otherwise narrow the search invisibly, at exit 0, with
+citations that look correct.
 
 `--rerank` rescores what the search already found, with a cross-encoder that
 reads query and passage together instead of comparing two vectors after the

@@ -165,9 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("question")
     ask.add_argument("-k", type=_at_least_one, default=5, help="passages to return")
     ask.add_argument(
-        "-c", "--collection", metavar="PATTERN",
+        "-c", "--collection", metavar="PATTERN", action="append",
         help="search only books whose title or path matches — a shelf "
-             "(neuroscience/), one work (Kandel), or a set (\"*Imaging*\")",
+             "(neuroscience/), one work (Kandel), or a set (\"*Imaging*\"). "
+             "Repeatable: several -c are a union, which is how a list of books "
+             "picked by hand is said. A pattern matching nothing is an error, "
+             "not a silent contribution of no books.",
     )
     ask.add_argument(
         "--mode", choices=("vector", "lexical", "hybrid"), default="hybrid",

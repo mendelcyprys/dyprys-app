@@ -335,3 +335,364 @@ def test_the_api_returns_what_the_cli_prints_for_json(client, index, command, ca
     from_api = client.get(f"/api/libraries/test/{command}").json()
 
     assert from_api == from_cli, f"`dyp {command} --json` and the API disagree"
+
+
+# --------------------------------------------------------------------------
+# Naming a library
+# --------------------------------------------------------------------------
+#
+# `dyp library add|remove|use` had no HTTP equivalent, so a browser could read
+# every library and name none. These check the three refusals that only matter
+# once the caller is a browser: a name that is also a URL segment, a path that
+# is only a typo, and a registry the client would otherwise clobber.
+
+
+@pytest.fixture
+def registry_client(tmp_path, monkeypatch):
+    """A real registry in a temp home — nothing here touches the user's own."""
+    monkeypatch.setenv("DYPRYS_HOME", str(tmp_path / "config"))
+    return TestClient(api.create_app())
+
+
+def test_a_directory_can_be_named_from_the_browser(registry_client, tmp_path):
+    """The gap that made a browser a read-only client of the registry."""
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+
+    made = registry_client.post("/api/libraries",
+                                json={"name": "shelf", "path": str(shelf)})
+
+    assert made.status_code == 201
+    names = [row["name"] for row in made.json()["libraries"]]
+    assert names == ["shelf"]
+    assert registry_client.get("/api/libraries").json()["libraries"][0]["default"] is True
+
+
+def test_registering_a_path_that_is_not_there_registers_nothing(registry_client, tmp_path):
+    """The CLI allows it because the next command usually creates the directory.
+
+    A browser has no next command, so a typo would become a registry entry that
+    nothing ever reports as wrong — it would simply fail at every use.
+    """
+    refused = registry_client.post("/api/libraries",
+                                   json={"name": "ghost", "path": str(tmp_path / "nope")})
+
+    assert refused.status_code == 404
+    assert registry_client.get("/api/libraries").json()["libraries"] == []
+
+
+@pytest.mark.parametrize("name", ["", "  ", "two words", "shelves/neuro", ".."])
+def test_a_name_that_could_not_be_a_url_segment_is_refused(registry_client, tmp_path, name):
+    """The name is a path parameter on every other route.
+
+    A `/` in it would silently change which route matched, and a space would
+    stop `dyp -L` from being able to say it — the two frontends must be able to
+    mean the same library.
+    """
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+
+    refused = registry_client.post("/api/libraries",
+                                   json={"name": name, "path": str(shelf)})
+
+    assert refused.status_code == 400
+    assert refused.json()["error"] == "bad_request"
+
+
+def test_a_taken_name_is_refused_with_the_names_already_used(registry_client, tmp_path):
+    """`registry.add` overwrites silently; over HTTP that is a lost library.
+
+    `choices` carries what is taken, because the UI that has to offer another
+    name is the one that needs them.
+    """
+    for which in ("one", "two"):
+        (tmp_path / which).mkdir()
+        registry_client.post("/api/libraries",
+                             json={"name": which, "path": str(tmp_path / which)})
+
+    clash = registry_client.post("/api/libraries",
+                                 json={"name": "one", "path": str(tmp_path / "two")})
+
+    assert clash.status_code == 400
+    assert set(clash.json()["choices"]) == {"one", "two"}
+    kept = {row["name"]: row["path"] for row in
+            registry_client.get("/api/libraries").json()["libraries"]}
+    assert kept["one"].endswith("/one"), "a clash rewrote the library it clashed with"
+
+
+def test_an_unknown_field_is_refused_rather_than_ignored(registry_client, tmp_path):
+    """Same rule as the search body: a dropped field is worse than a refusal."""
+    (tmp_path / "shelf").mkdir()
+
+    refused = registry_client.post(
+        "/api/libraries",
+        json={"name": "shelf", "path": str(tmp_path / "shelf"), "delete": True})
+
+    assert refused.status_code == 400
+
+
+def test_forgetting_a_library_leaves_its_files_alone(registry_client, tmp_path):
+    """The name goes; the index does not. `--delete` has no route on purpose."""
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+    (shelf / "dyprys.sqlite").write_text("not really an index")
+    registry_client.post("/api/libraries", json={"name": "shelf", "path": str(shelf)})
+
+    gone = registry_client.delete("/api/libraries/shelf")
+
+    assert gone.status_code == 200
+    assert gone.json()["libraries"] == []
+    assert (shelf / "dyprys.sqlite").exists(), "forgetting a name deleted an index"
+
+
+def test_forgetting_a_name_that_is_not_there_says_which_are(registry_client, tmp_path):
+    (tmp_path / "shelf").mkdir()
+    registry_client.post("/api/libraries", json={"name": "shelf", "path": str(tmp_path / "shelf")})
+
+    missing = registry_client.delete("/api/libraries/nope")
+
+    assert missing.status_code == 404
+    assert missing.json()["choices"] == ["shelf"]
+
+
+def test_the_default_can_be_moved_and_is_the_same_default_the_cli_reads(registry_client, tmp_path):
+    """One registry, two frontends: `dyp library use` and this are one setting."""
+    from dyprys import registry
+
+    for which in ("one", "two"):
+        (tmp_path / which).mkdir()
+        registry_client.post("/api/libraries",
+                             json={"name": which, "path": str(tmp_path / which)})
+
+    moved = registry_client.post("/api/libraries/two/default")
+
+    assert moved.status_code == 200
+    assert {row["name"] for row in moved.json()["libraries"] if row["default"]} == {"two"}
+    assert registry.resolve(None) == tmp_path / "two"
+
+
+def test_a_scope_can_be_a_list_of_books_over_http(client, index):
+    """What a checkbox list sends. `collection` is `str | list[str]`.
+
+    A UI cannot honestly turn several selected books into one glob, so the
+    request carries them as they were picked and the server unions them.
+    """
+    directory, _ = index
+    from dyprys import db
+
+    conn = db.connect(directory)
+    titles = [row["title"] for row in conn.execute("SELECT title FROM books ORDER BY id")]
+    conn.close()
+
+    answered = ask(client, collection=titles)
+    assert answered.status_code == 200
+
+    one = ask(client, collection=[titles[0]])
+    assert one.status_code == 200
+    assert {row["book"] for row in one.json()["results"]
+            if "phrase" not in row["provenance"]} == {titles[0]}
+
+
+def test_a_pattern_that_matches_nothing_is_still_a_404_inside_a_list(client, index):
+    """The refusal a union would otherwise swallow.
+
+    404 rather than 200-with-fewer-books: the request named something this index
+    does not hold, and a UI that dropped a book from a checkbox list would
+    otherwise show a narrowed search that looks complete.
+    """
+    directory, _ = index
+    from dyprys import db
+
+    conn = db.connect(directory)
+    first = conn.execute("SELECT title FROM books ORDER BY id").fetchone()["title"]
+    conn.close()
+
+    refused = ask(client, collection=[first, "no-such-shelf"])
+
+    assert refused.status_code == 404
+    assert "no-such-shelf" in refused.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# Choosing a model without typing a path
+# --------------------------------------------------------------------------
+
+
+def test_the_weights_on_this_machine_can_be_listed(client, index, tmp_path, monkeypatch):
+    """The reranker is the reason this exists.
+
+    Unlike the expander and summariser, whose choices the index remembers, a
+    cross-encoder must be named on every search and bare `--rerank` is an error
+    rather than a downgrade. A browser has no tab-completing path, so something
+    has to say what is there.
+    """
+    shelf = tmp_path / "weights"
+    (shelf / "nested").mkdir(parents=True)
+    (shelf / "reranker.gguf").write_bytes(b"x" * 11)
+    (shelf / "nested" / "embedder.gguf").write_bytes(b"y" * 22)
+    (shelf / "notes.txt").write_text("not a model")
+    monkeypatch.setenv("DYPRYS_MODEL_DIR", str(shelf))
+
+    found = client.get("/api/libraries/test/models/available").json()
+
+    names = {row["name"] for row in found["models"]}
+    assert names == {"reranker.gguf", "embedder.gguf"}, (
+        "one directory down is where models are commonly kept; a .txt is not a model")
+    assert {row["bytes"] for row in found["models"]} == {11, 22}
+    assert str(shelf) in found["searched"], "a caller cannot judge an empty list without this"
+
+
+def test_a_directory_that_is_not_there_is_not_an_error(client, monkeypatch, tmp_path):
+    """A picker opening is not the moment to fail over a stale config entry."""
+    monkeypatch.setenv("DYPRYS_MODEL_DIR", str(tmp_path / "gone"))
+
+    found = client.get("/api/libraries/test/models/available")
+
+    assert found.status_code == 200
+    assert found.json()["models"] == []
+
+
+def test_a_model_can_be_given_a_short_name(client):
+    """`hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9…` identifies weights exactly
+    and tells a person nothing. The alias is stored in the index, so a name
+    chosen in a browser is one `dyp --model` accepts in a terminal."""
+    named = client.post("/api/libraries/test/models/stub/alias", json={"alias": "quick"})
+
+    assert named.status_code == 200
+    assert named.json()["alias"] == "quick"
+    assert [m["alias"] for m in client.get("/api/libraries/test/models").json()["models"]] == ["quick"]
+
+
+def test_an_alias_that_is_a_path_is_refused(client):
+    """`--model` takes either, so an alias that looks like one is a trap."""
+    refused = client.post("/api/libraries/test/models/stub/alias",
+                          json={"alias": "/models/thing.gguf"})
+
+    assert refused.status_code == 400
+
+
+def test_naming_a_model_that_is_not_here_says_what_is(client):
+    """400 with the models to pick from — the same shape `model_ambiguous` has,
+    because the UI's job in both cases is to render a picker."""
+    missing = client.post("/api/libraries/test/models/nope/alias", json={"alias": "x"})
+
+    assert missing.status_code == 400
+    assert missing.json()["choices"] == ["stub"]
+
+
+def test_a_summariser_refusal_arrives_as_an_answer_not_an_absence(client, monkeypatch):
+    """The surest evidence a library lacks something, and it must survive HTTP.
+
+    `dyp ask --summarise` says "these passages do not answer the question"
+    outright, and retries once with the model's own rephrasing before giving up.
+    A refusal that survived the rephrasing means something; one that was never
+    rephrased does not — and stored prose reading NO ANSWER IN PASSAGES looks
+    identical either way, so `refused` carries the words that were tried.
+    """
+    from dyprys import summarise as summarise_mod
+    from dyprys.summarise import NO_ANSWER
+
+    said = []
+
+    def talk(model, prompt, *a, **k):
+        said.append(prompt)
+        return "other words entirely" if len(said) == 2 else NO_ANSWER
+
+    monkeypatch.setattr(summarise_mod, "ask_ollama", talk)
+
+    answered = ask(client, summarise="stub-summariser").json()
+
+    assert answered["answer"]["prose"] == NO_ANSWER
+    assert answered["answer"]["refused"] == "other words entirely", (
+        "a browser cannot tell a rephrased refusal from an unrephrased one")
+    assert answered["answer"].get("drawn_from") is None, (
+        "the retry found nothing, so the answer is about the passages on screen")
+
+
+def test_a_successful_retry_says_which_passages_it_is_about(client, monkeypatch):
+    """The asymmetry the API used to drop entirely.
+
+    When the retry works, the answer is drawn from the *retry's* passages while
+    `results` still holds the original search — and `cited` indexes into the
+    former. Without `drawn_from`, a reader is shown an answer citing passages
+    that are not on the screen, with citations that look correct.
+    """
+    from dyprys import summarise as summarise_mod
+    from dyprys.summarise import NO_ANSWER
+
+    said = []
+
+    def talk(model, prompt, *a, **k):
+        said.append(prompt)
+        if len(said) == 1:
+            return NO_ANSWER
+        if len(said) == 2:
+            return "neurons and synapses"
+        return "They are connected."
+
+    monkeypatch.setattr(summarise_mod, "ask_ollama", talk)
+
+    answered = ask(client, summarise="stub-summariser").json()
+
+    assert answered["answer"]["retried"] == "neurons and synapses"
+    drawn = answered["answer"]["drawn_from"]
+    assert drawn and all({"chunk_id", "book", "path", "offset"} <= set(row) for row in drawn)
+
+
+def test_one_held_lock_does_not_report_five_running_jobs(client, index):
+    """Every kind takes the same lock, so a held lock says the index is busy and
+    says nothing about *what* is busy.
+
+    Reported per kind, that made one run look like five, with one pid shared
+    between them and four of the five wrong. `busy` is the honest per-index
+    fact; `running` stays per kind.
+    """
+    directory, _ = index
+    from dyprys import lock
+
+    with lock.exclusive(directory, "embed"):
+        body = client.get("/api/libraries/test/jobs").json()
+
+    assert all(body[kind]["busy"] for kind in body), "the index is busy, whoever holds it"
+    assert [kind for kind in body if body[kind]["running"]] == ["embed"], (
+        "an unattributed holder belongs to embed alone — it is the lock's name, "
+        "and the only kind that runs long enough for anyone to be watching")
+
+
+def test_a_job_this_server_started_is_attributed_to_its_own_kind(client, index, monkeypatch):
+    """The marker `start` leaves, and the only thing that can tell route from embed.
+
+    Trusted only when the recorded pid is the pid actually holding the lock, so
+    a stale file attributes nothing and a run started from a terminal is an
+    unattributed holder rather than a misattributed one.
+    """
+    import os
+
+    from dyprys import jobs, lock
+
+    directory, _ = index
+    jobs.log_dir(directory).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(lock, "holder", lambda *a, **k: os.getpid())
+    jobs._remember(directory, jobs.JobRef("route", os.getpid(), directory / "x.log", "now"))
+
+    body = client.get("/api/libraries/test/jobs").json()
+
+    assert body["route"]["running"] is True
+    assert body["route"]["holder_kind"] == "route"
+    assert body["embed"]["running"] is False, "a route is not an embed"
+    assert body["embed"]["busy"] is True, "but the index is busy either way"
+
+
+def test_a_stale_marker_attributes_nothing(client, index, monkeypatch):
+    from dyprys import jobs, lock
+
+    directory, _ = index
+    jobs.log_dir(directory).mkdir(parents=True, exist_ok=True)
+    jobs._remember(directory, jobs.JobRef("route", 999_999, directory / "x.log", "now"))
+    monkeypatch.setattr(lock, "holder", lambda *a, **k: 4242)
+
+    body = client.get("/api/libraries/test/jobs").json()
+
+    assert body["route"]["holder_kind"] is None
+    assert body["route"]["running"] is False
+    assert body["embed"]["running"] is True, "an unknown holder falls back to embed"

@@ -296,7 +296,7 @@ class SearchOptions:
     k: int = 5
     mode: str = "hybrid"
     model: str | None = None
-    collection: str | None = None
+    collection: str | list[str] | None = None
     route: int = 0
     rerank: int = 0
     depth: int = 0
@@ -359,14 +359,35 @@ class Summary:
     failed: str | None = None
 
     def as_record(self) -> dict:
-        """The shape `dyp asked` stores, so a good answer can be found again."""
-        return {
+        """The shape `dyp asked` stores, so a good answer can be found again.
+
+        `retried` and `refused` are the two things the terminal prints and a
+        record without them cannot say. A refusal that survived a rephrasing is
+        strong evidence the library lacks the answer; one that was never
+        rephrased is not, and stored prose reading "NO ANSWER IN PASSAGES" looks
+        identical either way.
+
+        `drawn_from` appears only after a successful retry, and then it matters
+        a great deal: the answer is about the *retry's* passages, not the ones
+        the search returned, and `cited` indexes into these. Without it a reader
+        is shown an answer citing passages that are not on the screen. Omitted
+        otherwise because it would only repeat the results beside it.
+        """
+        record = {
             "prose": self.answer.prose.strip(),
             "verified": [{"cited": c.cited, "quote": c.quote, "where": c.location}
                          for c in self.answer.verified],
             "rejected": [{"cited": c.cited, "quote": c.quote}
                          for c in self.answer.rejected],
+            "retried": self.retried,
+            "refused": self.failed,
         }
+        if self.retried:
+            record["drawn_from"] = [
+                {"chunk_id": p.chunk_id, "book": p.title, "path": str(p.path),
+                 "offset": p.offset}
+                for p in self.passages]
+        return record
 
 
 # --------------------------------------------------------------------------
@@ -789,14 +810,19 @@ def search(session: Session, question: str, options: SearchOptions | None = None
 
     embedder, model_id, store = session.model(options.model)
 
-    from dyprys.search import resolve, scanned_fraction, scope_books
+    from dyprys.search import resolve, scanned_fraction, scope
 
     books = None
     if options.collection:
-        books = scope_books(conn, options.collection)
-        if not books:
+        books, missed = scope(conn, options.collection)
+        # Every miss, not only the case where nothing matched at all. Under a
+        # union a mistyped pattern contributes no books and changes no result,
+        # so it would otherwise narrow the search silently -- and `-c` is a
+        # promise about which books were ranked.
+        if missed:
+            named = ", ".join(repr(pattern) for pattern in missed)
             raise errors.NoSuchBook(
-                f"no book matches {options.collection!r}; try `dyp books`")
+                f"no book matches {named}; try `dyp books`")
 
     router, warnings = _router(conn, session.directory, embedder, model_id,
                                options.route, books)
@@ -1045,6 +1071,81 @@ def books_payload(conn, pattern: str | None = None) -> dict:
         for b in inspect(conn, pattern)]}
 
 
+# The extensions a local model is packaged as. One, today, and named rather
+# than inlined so the two places that scan agree about it.
+WEIGHTS_SUFFIX = ".gguf"
+
+
+def available_models(directories) -> dict:
+    """The model files on this machine, under directories the caller chose.
+
+    Which directories is the *frontend's* question — a terminal has a shell and
+    a tab-completing path, a browser has neither — so this takes them rather
+    than knowing where anyone keeps their weights.
+
+    The point is `--reranker`. Unlike the expander and summariser, whose choices
+    the index remembers, a reranker must be named on every search, and bare
+    `--rerank` is an error rather than a downgrade. "Type an absolute path each
+    time" is not a design in a browser, so something has to list what is there.
+
+    Nothing here guesses what a file *is*. A cross-encoder and a chat model are
+    both a .gguf, and the difference is not in the name; reporting a guess as a
+    fact would be worse than reporting nothing, because a chat model used as a
+    reranker rescores silently and plausibly.
+    """
+    seen: dict[str, dict] = {}
+    for directory in directories:
+        where = Path(directory).expanduser()
+        if not where.is_dir():
+            continue
+        # One level down as well: models are commonly kept one directory per
+        # model. Not deeper — this runs on every request that opens a picker.
+        for pattern in (f"*{WEIGHTS_SUFFIX}", f"*/*{WEIGHTS_SUFFIX}"):
+            for found in sorted(where.glob(pattern)):
+                try:
+                    size = found.stat().st_size
+                except OSError:
+                    continue
+                seen.setdefault(str(found), {
+                    "path": str(found), "name": found.name, "bytes": size,
+                    "directory": str(found.parent),
+                })
+    return {"models": sorted(seen.values(), key=lambda row: row["name"].lower()),
+            "searched": [str(Path(d).expanduser()) for d in directories]}
+
+
+def name_model(conn, wanted: str, alias: str) -> dict:
+    """Give a model a short name to type. The weights identity is unchanged.
+
+    `hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc` identifies weights
+    exactly and tells a person nothing, which is what the alias is for — and it
+    is stored in the index, so a name chosen in a browser is one the terminal
+    can type too.
+    """
+    chosen = (alias or "").strip()
+    if not chosen:
+        raise errors.BadRequest("an alias needs to be something")
+    if chosen.endswith(WEIGHTS_SUFFIX) or "/" in chosen:
+        raise errors.BadRequest(
+            f"{chosen!r} looks like a path; an alias is a short word to type "
+            f"in place of one")
+    row = db.find_model(conn, wanted)
+    if row is None:
+        raise errors.ModelMissing(
+            f"no model matches {wanted!r}",
+            choices=[m["name"] for m in
+                     conn.execute("SELECT name FROM models ORDER BY id")])
+    taken = conn.execute(
+        "SELECT name FROM models WHERE alias = ? AND id != ?",
+        (chosen, row["id"])).fetchone()
+    if taken is not None:
+        # The column is uniquely indexed, so this would otherwise surface as an
+        # IntegrityError -- a 500 for something the caller can fix.
+        raise errors.BadRequest(f"{chosen!r} is already {taken['name']}'s alias")
+    db.set_alias(conn, row["id"], chosen)
+    return {"name": row["name"], "alias": chosen}
+
+
 def models_payload(conn, directory) -> dict:
     """What has embedded this index, how far, and at what cost on disk."""
     from dyprys.library import models as inspect
@@ -1143,6 +1244,88 @@ def asked_payload(conn, limit: int = 15, match: str | None = None,
         return _asked_row(one) if one else None
     return {"questions": [_asked_row(r)
                           for r in db.questions_asked(conn, limit, match)]}
+
+
+# --- naming a library ------------------------------------------------------
+#
+# `dyp library add|remove|use` write the registry; the API had no equivalent, so
+# a browser could read every library and name none. These three wrap
+# `registry` so both frontends refuse the same things for the same reasons —
+# and so the refusals arrive as typed errors rather than as a `print` and a 1.
+
+
+def _registry_name(name: str) -> str:
+    """A name that can be a path segment and a shell word.
+
+    The API carries the name in the URL, so a `/` would silently change which
+    route matched; the CLI carries it as an argument. Refused in the service so
+    both agree, and so a name registered from the browser is one the terminal
+    can still type.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise errors.BadRequest("a library needs a name")
+    if any(c in cleaned for c in "/\\ \t\n") or cleaned in (".", ".."):
+        raise errors.BadRequest(
+            f"{cleaned!r} cannot be a library name — no slashes or spaces, "
+            f"because the name is a path segment in the API and an argument to "
+            f"`dyp -L`")
+    return cleaned
+
+
+def register_library(name: str, path, make_default: bool | None = None) -> dict:
+    """Give a directory a name. The library's files are never created here.
+
+    The directory must already exist. `dyp library add` allows one that does
+    not, because the next command in a terminal usually creates it; a browser
+    has no such next command and a typo would register a path that nothing ever
+    reports as wrong.
+    """
+    from dyprys import registry
+
+    named = _registry_name(name)
+    where = Path(path).expanduser()
+    if not str(path).strip():
+        raise errors.BadRequest("a library needs a directory")
+    if not where.exists():
+        raise errors.NoSuchLibrary(f"nothing at {where} — the directory must exist")
+    if not where.is_dir():
+        raise errors.BadRequest(f"{where} is a file; a library is a directory")
+    taken = {entry.name for entry in registry.libraries()}
+    if named in taken:
+        raise errors.BadRequest(
+            f"{named!r} is already registered — forget it first, or pick "
+            f"another name", choices=sorted(taken))
+
+    registry.add(named, where.resolve(), make_default)
+    return libraries_payload()
+
+
+def forget_library(name: str) -> dict:
+    """Drop a name. The index and the text behind it are not touched.
+
+    Deliberately *only* the name. `dyp library remove --delete` will erase an
+    index directory; over HTTP that is a button one misclick away from days of
+    embedding, so the API does not offer it and the message says where it lives.
+    """
+    from dyprys import registry
+
+    if not registry.remove((name or "").strip()):
+        raise errors.NoSuchLibrary(
+            f"no library named {name!r}",
+            choices=[entry.name for entry in registry.libraries()])
+    return libraries_payload()
+
+
+def default_library(name: str) -> dict:
+    """Which library a bare `dyp` command means."""
+    from dyprys import registry
+
+    if not registry.use((name or "").strip()):
+        raise errors.NoSuchLibrary(
+            f"no library named {name!r}",
+            choices=[entry.name for entry in registry.libraries()])
+    return libraries_payload()
 
 
 def libraries_payload() -> dict:

@@ -23,10 +23,15 @@ files on the network. `dyp serve` says so on stderr if you do it anyway.
 ```
 GET    /api/health                            is it up, and which models are warm
 GET    /api/libraries                         every registered library
+POST   /api/libraries                         name a directory on this machine
+DELETE /api/libraries/{name}                  forget a name; files untouched
+POST   /api/libraries/{name}/default          which library a bare `dyp` means
 GET    /api/libraries/{name}/status           totals, coverage, the notes path
 GET    /api/libraries/{name}/check?deep=      what drifted, what is outstanding
 GET    /api/libraries/{name}/books?pattern=   what is in the library
 GET    /api/libraries/{name}/models           what embedded it, how far
+GET    /api/libraries/{name}/models/available the .gguf files on this machine
+POST   /api/libraries/{name}/models/{m}/alias a short name to type
 GET    /api/libraries/{name}/history?limit=   embed runs and index operations
 GET    /api/libraries/{name}/asked?limit=&find=&which=
 GET    /api/libraries/{name}/notes            the library's NOTES.md, raw
@@ -45,6 +50,42 @@ literally: one builder in `dyprys.service` feeds both frontends, and
 `tests/test_api.py::test_the_api_returns_what_the_cli_prints_for_json` compares
 them. So `docs/maintenance.md` and CLAUDE.md's `--json` notes describe these
 responses too, and there is nothing extra to learn.
+
+## Naming a library
+
+`dyp library add|remove|use` had no HTTP equivalent, so a browser could read
+every library and name none. Three routes close that, and all three return the
+same `GET /api/libraries` payload so a client can seed its cache from the reply.
+
+```json
+POST /api/libraries   {"name": "neuro", "path": "/Users/you/dyprys/neuro"}
+```
+
+The path is **server-side text, not an upload** — a browser cannot pick a
+directory, and this server is loopback-only and already reads the whole
+filesystem through `dyp add`. Registering creates nothing; it is the registry
+entry alone.
+
+Three refusals the CLI does not make, all of them because the caller is now a
+browser:
+
+- **the directory must exist.** `dyp library add` allows one that does not,
+  because the next command in a terminal usually creates it. A browser has no
+  such next command, so a typo would become an entry that nothing reports as
+  wrong and every use fails on.
+- **no slashes or spaces in the name.** It is a path parameter on every other
+  route, so a `/` would silently change which route matched, and a space would
+  stop `dyp -L` from saying it — the two frontends have to be able to mean the
+  same library.
+- **a name already taken is a 400 carrying every taken name in `choices`**,
+  rather than `registry.add`'s silent overwrite, which over HTTP is a lost
+  library.
+
+`DELETE` forgets the name and touches nothing on disk. The CLI's
+`--delete`, which erases the index directory, deliberately has **no route**:
+over HTTP that is one misclick from days of embedding, and a terminal is the
+right place to confirm it. Deleting also drops the library's warm session,
+because the name has stopped meaning that directory.
 
 ## Searching
 
@@ -70,6 +111,21 @@ The response is `dyp ask --json`'s payload — `query`, `mode`, `routed`,
 `chapter`, `path`, `offset`, `cos`, `provenance`, `state`, `text` — plus four
 fields the CLI prints rather than serialises: `warnings`, `answer`, `expansion`,
 `models`.
+
+`answer` carries three fields beyond the prose and its checked quotations, and
+each says something a reader cannot otherwise recover:
+
+- **`refused`** — the rephrasing that *also* found nothing. `--summarise` says
+  "these passages do not answer the question" and retries once with the model's
+  own words before giving up. A refusal that survived that is strong evidence
+  the library lacks the answer; one that was never rephrased is not, and stored
+  prose reading `NO ANSWER IN PASSAGES` looks identical either way.
+- **`retried`** — the rephrasing that worked.
+- **`drawn_from`** — present only after a successful retry, and then it matters
+  a great deal: the answer is about the *retry's* passages while `results` still
+  holds the original search, and `verified[].cited` indexes into these. Without
+  it a reader is shown an answer citing passages that are not on the screen,
+  with citations that look correct.
 
 Read `results` the way `docs/searching.md` says to read the terminal output.
 Three of those rules matter more over HTTP, because a browser hides what a
@@ -123,6 +179,37 @@ and a second library's files all pass one. Anything unlisted is a 404. `span` is
 capped at `service.MAX_SPAN` (200 KB) rather than refused, because a UI asking
 for too much should get what it may have.
 
+## Choosing a model
+
+`GET /models/available` lists the `.gguf` files on the machine, so a browser can
+offer them instead of asking for an absolute path.
+
+**It exists for `--reranker`.** The expander and summariser default to whatever
+the library last used, and the index stores it. The cross-encoder is not
+remembered anywhere, must be named on every search, and bare `rerank` is an
+error rather than a downgrade — so a browser needs somewhere to get one from,
+and a UI keeping it per library in `localStorage` is the whole of that design.
+
+Where to look is the **frontend's** question and is answered in `api.py`: the
+directories of weights this index already remembers (the likeliest home, and
+needing no configuration), `$DYPRYS_MODEL_DIR` for anywhere else, and
+`~/.cache/qmd/models`. One level down each, since models are commonly kept one
+directory per model. `searched` comes back with the list, because an empty
+result is only readable next to where it looked.
+
+Nothing here guesses what a file *is*. A cross-encoder and a chat model are both
+a `.gguf` and the difference is not in the name; a guess reported as a fact
+would be worse than nothing, since a chat model used as a reranker rescores
+silently and plausibly.
+
+`POST /models/{model}/alias` gives a model a short name.
+`hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc` identifies weights exactly
+and tells a person nothing. The alias is stored in the index rather than the
+client, so one chosen in a browser is one `dyp --model` accepts in a terminal.
+An alias that looks like a path is refused — `--model` takes either, so the
+confusion is real — and so is one already belonging to another model, which the
+unique index would otherwise raise as a 500.
+
 ## Jobs
 
 Searching runs in this process; every mutation runs as a detached `dyp`
@@ -141,12 +228,28 @@ run the browser started; `GET /jobs` reports on one a terminal started.
 
 ```jsonc
 // GET /api/libraries/neuro/jobs/embed
-{"kind": "embed", "running": true, "pid": 43666,
+{"kind": "embed", "busy": true, "running": true, "holder_kind": "embed", "pid": 43666,
  "model": "hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc",
  "done": 64, "live": 960, "share": 0.067,
  "rate": 38.3, "eta_seconds": 23, "book_in_flight": "doc0",
  "log": "/path/.jobs/embed-20260908T112926.log"}
 ```
+
+**`busy` is about the index; `running` is about the kind.** Every kind takes the
+same lock — `compact` rewrites vector files and cannot run beside an embed
+either — so a held lock says this index is busy and, on its own, says nothing
+about *what* is busy. Reported per kind that made one run look like five, with
+one pid shared between them and four of the five wrong.
+
+`start` leaves a marker naming the kind and pid it spawned, and `holder_kind` is
+filled in when that pid is the one actually holding the lock. A stale marker
+attributes nothing. A run started from a terminal writes no marker, so it is an
+**unattributed holder**: `busy` everywhere, `holder_kind` null, and `running`
+reported under `embed` alone — the lock's name, and the only kind that runs long
+enough for anyone to be watching.
+
+A UI should say "this index is busy" once, from `busy`, rather than draw five
+running jobs.
 
 `rate` comes from the gap between *your own* polls, because a request cannot
 sleep to take a second sample. Until a second poll arrives it falls back to
