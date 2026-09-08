@@ -49,7 +49,7 @@ installs in editable mode. Check it worked:
 
 ```sh
 dyp            # prints help
-pytest         # 700 pass; the rest skip until the modules they specify exist
+pytest         # 755, all green
 ```
 
 Two runtime dependencies only: `llama-cpp-python` (the embedding model, run
@@ -225,6 +225,60 @@ vectors.
 
 ---
 
+## From a browser
+
+`dyp serve` puts the same searches behind an HTTP API, for a web UI to call.
+It is an optional extra — core `dyp` keeps its two dependencies.
+
+```sh
+uv pip install -e '.[api]'
+dyp serve --port 8765            # 127.0.0.1 only, no authentication
+```
+
+```
+GET    /api/health · /api/libraries
+GET    /api/libraries/{name}/status | check | books | models | history | asked
+GET    /api/libraries/{name}/notes            the library's NOTES.md, raw
+POST   /api/libraries/{name}/ask              the `--json` payload, plus warnings
+POST   /api/libraries/{name}/ask/stream       NDJSON: stage frames, then one result
+GET    /api/libraries/{name}/source?path=&offset=&span=
+POST   /api/libraries/{name}/warm             load a model before the first question
+GET    /api/libraries/{name}/jobs             what is running, how far, how fast
+POST   /api/libraries/{name}/jobs/{kind}      start embed | add | route | lexical | compact
+DELETE /api/libraries/{name}/jobs/{kind}      stop it, gracefully
+```
+
+Three things are worth knowing before building against it.
+
+**Searching happens in this process; every mutation is a subprocess.** The warm
+model is the whole reason the API exists — reloading a 300 MB–1 GB GGUF per query
+costs more than the search does — so `ask` holds it between requests. Writes go
+the other way and spawn a real `dyp`, because an embed can run for days and has to
+outlive a server restart. `dyp watch` in a terminal follows a run the browser
+started, and `GET /jobs` reports on one a terminal started; there is one run,
+seen from two places. Stopping one is safe because embedding is resumable: the
+signal lets it finish the batch in flight and commit.
+
+**Each library gets one worker thread.** A sqlite connection belongs to the
+thread that opened it and llama.cpp is not re-entrant, so a second simultaneous
+search against the same library queues — which is right, since the model is the
+bottleneck and running two at once only makes both slower.
+
+**It reports rather than interprets.** `cos`, `provenance`, `state`,
+`scanned_fraction` and `warnings` pass through untouched, and `text` stays `null`
+for a passage that could not be proved against its stored hash. Nothing about a
+corpus is encoded in the server: `GET /notes` transports the library's own notes,
+and every route is scoped by a library name resolved through the registry.
+
+Bind `127.0.0.1` and keep it there. There is no authentication — this is one
+person's library on one machine — so a public interface would put an
+unauthenticated reader of your files on the network.
+
+→ **`docs/serving.md`** — the payload shapes, the job lifecycle, the status
+codes, and how the two frontends are kept from drifting.
+
+---
+
 ## How it works, in one screen
 
 A handful of decisions carry the design. They are stated here so the tool is
@@ -274,8 +328,13 @@ src/dyprys/
   evaluate.py    the retrieval harness
   text.py        the only place that reads a book's bytes back
   term.py        emphasis, extracts, bars — and none of it when piped
+  errors.py      failures as typed values, with the prose attached
+  progress.py    what a slow search is doing, before anyone renders it
+  service.py     the ask pipeline, model resolution and the --json payloads
+  jobs.py        the long mutations, as detached subprocesses
   cli.py         `dyp` resolves to dyprys.cli:main
-tests/           pytest — 713 tests
+  api.py         the same, over HTTP (optional: `pip install 'dyprys[api]'`)
+tests/           pytest — 755 tests
 CLAUDE.md        the operator's decision manual, loaded by an agent
 docs/            deeper operational reference, linked on-demand from CLAUDE.md
 ```
