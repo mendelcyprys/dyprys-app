@@ -49,7 +49,7 @@ installs in editable mode. Check it worked:
 
 ```sh
 dyp            # prints help
-pytest         # 577 tests, all green
+pytest         # 700 pass; the rest skip until the modules they specify exist
 ```
 
 Two runtime dependencies only: `llama-cpp-python` (the embedding model, run
@@ -275,10 +275,9 @@ src/dyprys/
   text.py        the only place that reads a book's bytes back
   term.py        emphasis, extracts, bars — and none of it when piped
   cli.py         `dyp` resolves to dyprys.cli:main
-tests/           pytest — 577 tests
+tests/           pytest — 713 tests
 CLAUDE.md        the operator's decision manual, loaded by an agent
 docs/            deeper operational reference, linked on-demand from CLAUDE.md
-demo.html        a self-contained visual overview — open it in a browser
 ```
 
 **The split is by I/O, not by topic** — the pure functions (chunking, fusion,
