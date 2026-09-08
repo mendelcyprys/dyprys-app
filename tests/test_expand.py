@@ -141,7 +141,7 @@ class StubExpander:
 
 def _run(conn, tmp_path, library, embedder, expander, mode="hybrid"):
     from dyprys import db as _db
-    from dyprys.cli import _searcher
+    from dyprys.service import _pipeline
     from dyprys.embed import store_for
     from dyprys.lexical import backfill
 
@@ -155,7 +155,7 @@ def _run(conn, tmp_path, library, embedder, expander, mode="hybrid"):
         store.write(cid, embedder.embed_query(f"chunk {cid}"))
     store.flush()
     backfill(conn)
-    return _searcher(conn, store, embedder, model, mode, None,
+    return _pipeline(conn, store, embedder, model, mode, None,
                      expander=expander)("about neurons", 5)
 
 
@@ -210,13 +210,10 @@ def test_an_empty_expansion_changes_nothing(conn, tmp_path, library, embedder):
 
 def test_expansion_is_off_unless_an_expander_is_given(conn, tmp_path, library, embedder):
     """The default path must not construct one, let alone call it."""
-    from dyprys.cli import _load_expander
+    from dyprys.service import SearchOptions, _expander_for
 
-    class Args:
-        expand = False
-        expander = "/nonexistent/model.gguf"
-
-    assert _load_expander(Args()) == (None, None)
+    assert _expander_for(conn, SearchOptions(
+        expand=False, expander="/nonexistent/model.gguf")) is None
 
 
 def test_the_instructions_echoed_back_are_not_an_expansion():
@@ -253,33 +250,32 @@ def test_an_unreachable_expander_is_reported_not_skipped(monkeypatch):
     results, same exit code, 468 ms instead of 5 s — so the user has no way to
     learn that the thing they asked for did not happen.
     """
-    from dyprys.cli import _load_expander
+    import pytest
+
+    from dyprys import errors
     from dyprys.expand import OllamaExpander
+    from dyprys.service import SearchOptions, _expander_for
 
     monkeypatch.setattr(OllamaExpander, "unavailable",
                         lambda self: "cannot reach ollama at http://localhost:11434")
 
-    class Args:
-        expand = True
-        expander = "gemma3:4b"
+    with pytest.raises(errors.ModelUnavailable) as refused:
+        _expander_for(None, SearchOptions(expand=True, expander="gemma3:4b"))
 
-    expander, problem = _load_expander(Args())
-    assert expander is None
-    assert "ollama" in problem
+    # Its own words. Replacing them with the generic "pass one: --expand MODEL"
+    # would send the user to name a model they have already named.
+    assert "ollama" in refused.value.message
+    assert refused.value.role == "expander"
 
 
 def test_a_reachable_expander_loads(monkeypatch):
-    from dyprys.cli import _load_expander
     from dyprys.expand import OllamaExpander
+    from dyprys.service import SearchOptions, _expander_for
 
     monkeypatch.setattr(OllamaExpander, "unavailable", lambda self: None)
 
-    class Args:
-        expand = True
-        expander = "gemma3:4b"
-
-    expander, problem = _load_expander(Args())
-    assert problem is None and expander.model == "gemma3:4b"
+    expander = _expander_for(None, SearchOptions(expand=True, expander="gemma3:4b"))
+    assert expander.model == "gemma3:4b"
 
 
 def test_the_two_backends_send_the_same_prompt():

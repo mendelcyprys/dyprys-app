@@ -268,3 +268,41 @@ def test_a_source_window_span_is_capped(session):
     text, _ = service.source_window(session, row["path"], 0, 10 ** 9)
 
     assert len(text.encode()) <= service.MAX_SPAN
+
+
+def test_a_summariser_retry_does_not_rewrite_what_the_search_returned(session, monkeypatch):
+    """The retry is a second search, and a second search rebinds the pipeline.
+
+    `_pipeline` attaches `why`, `cosine` and `expansion` to the callable and
+    overwrites all three on every call. The summariser's retry calls it again --
+    with the model's own rephrasing, over different books -- so anything that
+    reads those attributes *after* summarising describes the rephrasing's
+    results while pointing at the passages the caller was handed.
+
+    Found by diffing real output: rank 3's cosine moved 0.15 to 0.20 while the
+    passage printed above it did not change. Nothing failed, and the citation
+    still looked right.
+    """
+    from dyprys import summarise as summarise_mod
+    from dyprys.summarise import NO_ANSWER
+
+    said = []
+
+    def talk(model, prompt, *a, **k):
+        # Refuse, offer other words, refuse again -- the shape that makes the
+        # retry run and then give up, so the first search's results stand.
+        said.append(prompt)
+        return SENTINEL if len(said) == 2 else NO_ANSWER
+
+    monkeypatch.setattr(summarise_mod, "ask_ollama", talk)
+
+    result = service.search(session, "neurons and synapses",
+                            service.SearchOptions(k=3, summarise="stub-summariser"))
+
+    assert len(said) == 3, "the retry did not run, so this proves nothing"
+    assert result.answer.failed == SENTINEL
+    for passage in result.passages:
+        assert passage.chunk_id in result.why, (
+            f"chunk {passage.chunk_id} was returned with provenance belonging "
+            f"to a different search")
+        assert passage.chunk_id in result.cosine

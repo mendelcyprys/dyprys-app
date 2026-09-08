@@ -399,7 +399,7 @@ def test_a_run_records_both_clocks_so_sleep_is_recoverable(conn):
     held only the first number, so `dyp history` could show a start and a
     duration that did not add up to anything.
     """
-    from dyprys.cli import _asleep
+    from dyprys.service import asleep_seconds as _asleep
 
     model = db.model_id(conn, "gemma@aaaaaaaaaaaa", 768)
     db.record_run(conn, model, db.now(), 4773.0, _Report(16588), wall=11000.0)
@@ -411,7 +411,7 @@ def test_a_run_records_both_clocks_so_sleep_is_recoverable(conn):
 
 def test_a_run_that_did_not_sleep_reports_none(conn):
     """The two clocks never agree exactly; a few seconds is not a sleep."""
-    from dyprys.cli import _asleep
+    from dyprys.service import asleep_seconds as _asleep
 
     model = db.model_id(conn, "gemma@aaaaaaaaaaaa", 768)
     db.record_run(conn, model, db.now(), 1800.0, _Report(7200), wall=1800.4)
@@ -421,7 +421,7 @@ def test_a_run_that_did_not_sleep_reports_none(conn):
 
 def test_runs_recorded_before_the_second_clock_existed_still_read(conn):
     """Older rows have no wall clock, and must not be read as never sleeping."""
-    from dyprys.cli import _asleep
+    from dyprys.service import asleep_seconds as _asleep
 
     model = db.model_id(conn, "gemma@aaaaaaaaaaaa", 768)
     db.record_run(conn, model, db.now(), 1800.0, _Report(7200))

@@ -151,7 +151,10 @@ def test_the_remembered_path_is_a_hint_and_the_size_is_checked(conn, tmp_path):
     so nothing breaks — but the symptom would be a very long run that looks
     entirely normal and shares none of the work already done.
     """
-    from dyprys.cli import _weights_for
+    import pytest
+
+    from dyprys import errors
+    from dyprys.service import _weights_for
 
     model = db.model_id(conn, "gemma@aaaaaaaaaaaa", 768,
                         provenance={"file_name": "gemma.gguf", "file_bytes": 1000,
@@ -160,14 +163,14 @@ def test_the_remembered_path_is_a_hint_and_the_size_is_checked(conn, tmp_path):
     weights.write_bytes(b"x" * 999)
     db.remember_weights(conn, model, weights)
 
-    path, why = _weights_for(conn, None)
+    with pytest.raises(errors.WeightsMismatch) as refused:
+        _weights_for(conn, None)
 
-    assert path is None
-    assert "not the" in why and "--model" in why
+    assert "not the" in refused.value.message and "--model" in refused.value.message
 
 
 def test_a_usable_remembered_path_needs_no_argument(conn, tmp_path):
-    from dyprys.cli import _weights_for
+    from dyprys.service import _weights_for
 
     model = db.model_id(conn, "gemma@aaaaaaaaaaaa", 768,
                         provenance={"file_name": "gemma.gguf", "file_bytes": 64,
@@ -176,15 +179,19 @@ def test_a_usable_remembered_path_needs_no_argument(conn, tmp_path):
     weights.write_bytes(b"x" * 64)
     db.remember_weights(conn, model, weights)
 
-    assert _weights_for(conn, None) == (str(weights), None)
+    assert _weights_for(conn, None) == str(weights)
 
 
 def test_with_no_model_at_all_it_says_how_to_start(conn):
-    from dyprys.cli import _weights_for
+    import pytest
 
-    path, why = _weights_for(conn, None)
+    from dyprys import errors
+    from dyprys.service import _weights_for
 
-    assert path is None and "--model" in why
+    with pytest.raises(errors.ModelMissing) as refused:
+        _weights_for(conn, None)
+
+    assert "--model" in refused.value.message
 
 
 def test_two_models_cannot_share_a_nickname(conn):

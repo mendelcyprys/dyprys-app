@@ -18,7 +18,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 import numpy as np
 
@@ -261,3 +261,67 @@ def store_for(conn: sqlite3.Connection, directory, model_id: int, dim: int) -> V
         rows=rows,
         quantisation=db.model_quantisation(conn, model_id),
     )
+
+
+# --------------------------------------------------------------------------
+# Following a run from outside it
+# --------------------------------------------------------------------------
+#
+# Nothing below is coupled to the running process. Progress is committed per
+# batch, so any reader sees it advance -- which is why `dyp watch` works from
+# another terminal, over ssh, or after the terminal that started the job has
+# gone, and why an HTTP endpoint can report on a run it did not start.
+
+
+class Standing(NamedTuple):
+    """How far one model has got, and which book it is in the middle of."""
+
+    live: int
+    done: int
+    inflight: sqlite3.Row | None
+
+
+def progress_of(conn: sqlite3.Connection, model_id: int,
+                chunking_id: int | None) -> Standing:
+    """`(live, done, inflight)` for one model, read straight from the index.
+
+    `live` is the chunk count of the chunking this model embeds, never the whole
+    library: summing progress across models counted a finished model's work
+    toward a running one's total, and a second model embedding into a library
+    the first had completed showed over 100% done.
+    """
+    if chunking_id is None:
+        live = conn.execute(
+            "SELECT COALESCE(SUM(chunk_count), 0) FROM segments").fetchone()[0]
+    else:
+        live = conn.execute(
+            "SELECT COALESCE(SUM(chunk_count), 0) FROM segments "
+            "WHERE chunking_id = ?", (chunking_id,)).fetchone()[0]
+    done = conn.execute(
+        "SELECT COALESCE(SUM(n_embedded), 0) FROM segment_progress "
+        "WHERE model_id = ?", (model_id,)).fetchone()[0]
+    inflight = conn.execute(
+        "SELECT b.title, p.n_embedded, seg.chunk_count FROM segment_progress p "
+        "JOIN segments seg ON seg.id = p.segment_id "
+        "JOIN sources src ON src.id = seg.source_id "
+        "JOIN books b ON b.id = src.book_id "
+        "WHERE p.model_id = ? AND p.n_embedded > 0 "
+        "AND p.n_embedded < seg.chunk_count LIMIT 1", (model_id,)).fetchone()
+    return Standing(live, done, inflight)
+
+
+def model_in_progress(conn: sqlite3.Connection):
+    """The model a running embed is most likely working on, or None.
+
+    The lock records a pid, not a model, so this is inferred: the model with
+    work left in the chunking it is bound to. With one model that is trivially
+    the right answer; with two it picks the unfinished one, which is the only
+    one an embed could be running for.
+    """
+    best = None
+    for m in conn.execute("SELECT id, name, chunking_id FROM models ORDER BY id"):
+        live, done, _ = progress_of(conn, m["id"], m["chunking_id"])
+        left = live - done
+        if left > 0 and (best is None or left > best[0]):
+            best = (left, m["id"], m["name"], m["chunking_id"])
+    return None if best is None else (best[1], best[2], best[3])

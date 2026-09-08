@@ -202,3 +202,36 @@ def elide(text: str, width: int, keep_tail: int = 12) -> str:
     tail = min(keep_tail, width - 2)
     head = width - tail - 1
     return f"{text[:head]}…{text[-tail:]}"
+
+
+# --- fitting a value onto a line -------------------------------------------
+#
+# Three shorteners, not one, because they are shortening different things and
+# the difference is load-bearing. `elide` keeps a title distinguishable, and
+# `shorten` keeps a model name recognisable; neither result can be typed back
+# in. `handle` is the one that can.
+
+
+def size(n: int) -> str:
+    """Bytes at the scale a person thinks in."""
+    for unit, scale in (("GB", 1e9), ("MB", 1e6), ("KB", 1e3)):
+        if n >= scale:
+            return f"{n / scale:.1f} {unit}"
+    return f"{n} B"
+
+
+def shorten(name: str, width: int = 34) -> str:
+    """Model names are long paths or hub ids; keep the identifying tail."""
+    return name if len(name) <= width else "…" + name[-(width - 1):]
+
+
+def handle(name: str, alias: str | None = None) -> str:
+    """Something you can actually type for `--model`.
+
+    Not `shorten`: that elides the middle to fit a column, and an elided name is
+    not a name -- pasted back it matches nothing. Any unique substring resolves,
+    so drop the @digest and keep an identifying tail.
+    """
+    if alias:
+        return alias
+    return name.split("@")[0][-28:] if "@" in name else name
