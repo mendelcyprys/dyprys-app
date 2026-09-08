@@ -23,6 +23,9 @@ files on the network. `dyp serve` says so on stderr if you do it anyway.
 ```
 GET    /api/health                            is it up, and which models are warm
 GET    /api/libraries                         every registered library
+POST   /api/libraries                         name a directory on this machine
+DELETE /api/libraries/{name}                  forget a name; files untouched
+POST   /api/libraries/{name}/default          which library a bare `dyp` means
 GET    /api/libraries/{name}/status           totals, coverage, the notes path
 GET    /api/libraries/{name}/check?deep=      what drifted, what is outstanding
 GET    /api/libraries/{name}/books?pattern=   what is in the library
@@ -45,6 +48,42 @@ literally: one builder in `dyprys.service` feeds both frontends, and
 `tests/test_api.py::test_the_api_returns_what_the_cli_prints_for_json` compares
 them. So `docs/maintenance.md` and CLAUDE.md's `--json` notes describe these
 responses too, and there is nothing extra to learn.
+
+## Naming a library
+
+`dyp library add|remove|use` had no HTTP equivalent, so a browser could read
+every library and name none. Three routes close that, and all three return the
+same `GET /api/libraries` payload so a client can seed its cache from the reply.
+
+```json
+POST /api/libraries   {"name": "neuro", "path": "/Users/you/dyprys/neuro"}
+```
+
+The path is **server-side text, not an upload** — a browser cannot pick a
+directory, and this server is loopback-only and already reads the whole
+filesystem through `dyp add`. Registering creates nothing; it is the registry
+entry alone.
+
+Three refusals the CLI does not make, all of them because the caller is now a
+browser:
+
+- **the directory must exist.** `dyp library add` allows one that does not,
+  because the next command in a terminal usually creates it. A browser has no
+  such next command, so a typo would become an entry that nothing reports as
+  wrong and every use fails on.
+- **no slashes or spaces in the name.** It is a path parameter on every other
+  route, so a `/` would silently change which route matched, and a space would
+  stop `dyp -L` from saying it — the two frontends have to be able to mean the
+  same library.
+- **a name already taken is a 400 carrying every taken name in `choices`**,
+  rather than `registry.add`'s silent overwrite, which over HTTP is a lost
+  library.
+
+`DELETE` forgets the name and touches nothing on disk. The CLI's
+`--delete`, which erases the index directory, deliberately has **no route**:
+over HTTP that is one misclick from days of embedding, and a terminal is the
+right place to confirm it. Deleting also drops the library's warm session,
+because the name has stopped meaning that directory.
 
 ## Searching
 

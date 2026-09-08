@@ -1145,6 +1145,88 @@ def asked_payload(conn, limit: int = 15, match: str | None = None,
                           for r in db.questions_asked(conn, limit, match)]}
 
 
+# --- naming a library ------------------------------------------------------
+#
+# `dyp library add|remove|use` write the registry; the API had no equivalent, so
+# a browser could read every library and name none. These three wrap
+# `registry` so both frontends refuse the same things for the same reasons —
+# and so the refusals arrive as typed errors rather than as a `print` and a 1.
+
+
+def _registry_name(name: str) -> str:
+    """A name that can be a path segment and a shell word.
+
+    The API carries the name in the URL, so a `/` would silently change which
+    route matched; the CLI carries it as an argument. Refused in the service so
+    both agree, and so a name registered from the browser is one the terminal
+    can still type.
+    """
+    cleaned = (name or "").strip()
+    if not cleaned:
+        raise errors.BadRequest("a library needs a name")
+    if any(c in cleaned for c in "/\\ \t\n") or cleaned in (".", ".."):
+        raise errors.BadRequest(
+            f"{cleaned!r} cannot be a library name — no slashes or spaces, "
+            f"because the name is a path segment in the API and an argument to "
+            f"`dyp -L`")
+    return cleaned
+
+
+def register_library(name: str, path, make_default: bool | None = None) -> dict:
+    """Give a directory a name. The library's files are never created here.
+
+    The directory must already exist. `dyp library add` allows one that does
+    not, because the next command in a terminal usually creates it; a browser
+    has no such next command and a typo would register a path that nothing ever
+    reports as wrong.
+    """
+    from dyprys import registry
+
+    named = _registry_name(name)
+    where = Path(path).expanduser()
+    if not str(path).strip():
+        raise errors.BadRequest("a library needs a directory")
+    if not where.exists():
+        raise errors.NoSuchLibrary(f"nothing at {where} — the directory must exist")
+    if not where.is_dir():
+        raise errors.BadRequest(f"{where} is a file; a library is a directory")
+    taken = {entry.name for entry in registry.libraries()}
+    if named in taken:
+        raise errors.BadRequest(
+            f"{named!r} is already registered — forget it first, or pick "
+            f"another name", choices=sorted(taken))
+
+    registry.add(named, where.resolve(), make_default)
+    return libraries_payload()
+
+
+def forget_library(name: str) -> dict:
+    """Drop a name. The index and the text behind it are not touched.
+
+    Deliberately *only* the name. `dyp library remove --delete` will erase an
+    index directory; over HTTP that is a button one misclick away from days of
+    embedding, so the API does not offer it and the message says where it lives.
+    """
+    from dyprys import registry
+
+    if not registry.remove((name or "").strip()):
+        raise errors.NoSuchLibrary(
+            f"no library named {name!r}",
+            choices=[entry.name for entry in registry.libraries()])
+    return libraries_payload()
+
+
+def default_library(name: str) -> dict:
+    """Which library a bare `dyp` command means."""
+    from dyprys import registry
+
+    if not registry.use((name or "").strip()):
+        raise errors.NoSuchLibrary(
+            f"no library named {name!r}",
+            choices=[entry.name for entry in registry.libraries()])
+    return libraries_payload()
+
+
 def libraries_payload() -> dict:
     """Every registered library, whether its index is there, and how far it got.
 

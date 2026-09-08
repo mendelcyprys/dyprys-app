@@ -335,3 +335,137 @@ def test_the_api_returns_what_the_cli_prints_for_json(client, index, command, ca
     from_api = client.get(f"/api/libraries/test/{command}").json()
 
     assert from_api == from_cli, f"`dyp {command} --json` and the API disagree"
+
+
+# --------------------------------------------------------------------------
+# Naming a library
+# --------------------------------------------------------------------------
+#
+# `dyp library add|remove|use` had no HTTP equivalent, so a browser could read
+# every library and name none. These check the three refusals that only matter
+# once the caller is a browser: a name that is also a URL segment, a path that
+# is only a typo, and a registry the client would otherwise clobber.
+
+
+@pytest.fixture
+def registry_client(tmp_path, monkeypatch):
+    """A real registry in a temp home — nothing here touches the user's own."""
+    monkeypatch.setenv("DYPRYS_HOME", str(tmp_path / "config"))
+    return TestClient(api.create_app())
+
+
+def test_a_directory_can_be_named_from_the_browser(registry_client, tmp_path):
+    """The gap that made a browser a read-only client of the registry."""
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+
+    made = registry_client.post("/api/libraries",
+                                json={"name": "shelf", "path": str(shelf)})
+
+    assert made.status_code == 201
+    names = [row["name"] for row in made.json()["libraries"]]
+    assert names == ["shelf"]
+    assert registry_client.get("/api/libraries").json()["libraries"][0]["default"] is True
+
+
+def test_registering_a_path_that_is_not_there_registers_nothing(registry_client, tmp_path):
+    """The CLI allows it because the next command usually creates the directory.
+
+    A browser has no next command, so a typo would become a registry entry that
+    nothing ever reports as wrong — it would simply fail at every use.
+    """
+    refused = registry_client.post("/api/libraries",
+                                   json={"name": "ghost", "path": str(tmp_path / "nope")})
+
+    assert refused.status_code == 404
+    assert registry_client.get("/api/libraries").json()["libraries"] == []
+
+
+@pytest.mark.parametrize("name", ["", "  ", "two words", "shelves/neuro", ".."])
+def test_a_name_that_could_not_be_a_url_segment_is_refused(registry_client, tmp_path, name):
+    """The name is a path parameter on every other route.
+
+    A `/` in it would silently change which route matched, and a space would
+    stop `dyp -L` from being able to say it — the two frontends must be able to
+    mean the same library.
+    """
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+
+    refused = registry_client.post("/api/libraries",
+                                   json={"name": name, "path": str(shelf)})
+
+    assert refused.status_code == 400
+    assert refused.json()["error"] == "bad_request"
+
+
+def test_a_taken_name_is_refused_with_the_names_already_used(registry_client, tmp_path):
+    """`registry.add` overwrites silently; over HTTP that is a lost library.
+
+    `choices` carries what is taken, because the UI that has to offer another
+    name is the one that needs them.
+    """
+    for which in ("one", "two"):
+        (tmp_path / which).mkdir()
+        registry_client.post("/api/libraries",
+                             json={"name": which, "path": str(tmp_path / which)})
+
+    clash = registry_client.post("/api/libraries",
+                                 json={"name": "one", "path": str(tmp_path / "two")})
+
+    assert clash.status_code == 400
+    assert set(clash.json()["choices"]) == {"one", "two"}
+    kept = {row["name"]: row["path"] for row in
+            registry_client.get("/api/libraries").json()["libraries"]}
+    assert kept["one"].endswith("/one"), "a clash rewrote the library it clashed with"
+
+
+def test_an_unknown_field_is_refused_rather_than_ignored(registry_client, tmp_path):
+    """Same rule as the search body: a dropped field is worse than a refusal."""
+    (tmp_path / "shelf").mkdir()
+
+    refused = registry_client.post(
+        "/api/libraries",
+        json={"name": "shelf", "path": str(tmp_path / "shelf"), "delete": True})
+
+    assert refused.status_code == 400
+
+
+def test_forgetting_a_library_leaves_its_files_alone(registry_client, tmp_path):
+    """The name goes; the index does not. `--delete` has no route on purpose."""
+    shelf = tmp_path / "shelf"
+    shelf.mkdir()
+    (shelf / "dyprys.sqlite").write_text("not really an index")
+    registry_client.post("/api/libraries", json={"name": "shelf", "path": str(shelf)})
+
+    gone = registry_client.delete("/api/libraries/shelf")
+
+    assert gone.status_code == 200
+    assert gone.json()["libraries"] == []
+    assert (shelf / "dyprys.sqlite").exists(), "forgetting a name deleted an index"
+
+
+def test_forgetting_a_name_that_is_not_there_says_which_are(registry_client, tmp_path):
+    (tmp_path / "shelf").mkdir()
+    registry_client.post("/api/libraries", json={"name": "shelf", "path": str(tmp_path / "shelf")})
+
+    missing = registry_client.delete("/api/libraries/nope")
+
+    assert missing.status_code == 404
+    assert missing.json()["choices"] == ["shelf"]
+
+
+def test_the_default_can_be_moved_and_is_the_same_default_the_cli_reads(registry_client, tmp_path):
+    """One registry, two frontends: `dyp library use` and this are one setting."""
+    from dyprys import registry
+
+    for which in ("one", "two"):
+        (tmp_path / which).mkdir()
+        registry_client.post("/api/libraries",
+                             json={"name": which, "path": str(tmp_path / which)})
+
+    moved = registry_client.post("/api/libraries/two/default")
+
+    assert moved.status_code == 200
+    assert {row["name"] for row in moved.json()["libraries"] if row["default"]} == {"two"}
+    assert registry.resolve(None) == tmp_path / "two"

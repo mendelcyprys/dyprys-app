@@ -152,6 +152,22 @@ class Indexes:
     async def run(self, name: str, work):
         return await asyncio.wrap_future(self.submit(name, work))
 
+    def forget(self, name: str) -> None:
+        """Drop a library's warm session, because its name stopped meaning that.
+
+        A registry edit changes what a name resolves to; the session cached
+        under it still holds a connection to the old directory and a model
+        loaded out of it, and would go on answering from there.
+        """
+        with self._guard:
+            pool = self._pools.pop(name, None)
+        if pool is None:
+            return
+        session = self._sessions.pop(name, None)
+        if session is not None:
+            pool.submit(session.close).result(timeout=10)
+        pool.shutdown(wait=False)
+
     @property
     def loaded(self) -> dict[str, list[str]]:
         return {name: session.loaded for name, session in self._sessions.items()}
@@ -245,6 +261,40 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
     @app.get("/api/libraries")
     async def libraries():
         return _json(service.libraries_payload())
+
+    @app.post("/api/libraries", status_code=201)
+    async def register(body: dict = Body(default_factory=dict)):
+        """Give a directory on *this machine* a name.
+
+        The path is server-side text, not an upload: a browser cannot pick a
+        directory, and this server is loopback-only and already reads the whole
+        filesystem through `dyp add`. Registering creates nothing — it is the
+        registry entry alone, so a wrong path costs a DELETE.
+        """
+        unknown = set(body) - {"name", "path", "default"}
+        if unknown:
+            raise errors.BadRequest(
+                f"unknown field(s): {', '.join(sorted(unknown))}. "
+                f"Registering a library takes: name, path, default.")
+        return _json(service.register_library(
+            body.get("name", ""), body.get("path", ""), body.get("default")), 201)
+
+    @app.delete("/api/libraries/{name}")
+    async def forget(name: str):
+        """Forget a name. Nothing on disk is touched.
+
+        The CLI's `--delete` — which erases the index directory — deliberately
+        has no route. Over HTTP that is one misclick from days of embedding,
+        and a terminal is the right place to confirm it.
+        """
+        payload = service.forget_library(name)
+        indexes.forget(name)
+        return _json(payload)
+
+    @app.post("/api/libraries/{name}/default")
+    async def make_default(name: str):
+        """Which library a bare `dyp` command means. Shared with the terminal."""
+        return _json(service.default_library(name))
 
     # --- reading one library ----------------------------------------------
 
