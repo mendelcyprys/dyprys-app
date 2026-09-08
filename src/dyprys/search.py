@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import re
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,24 +51,45 @@ class Passage:
     offset: int = 0
 
 
-def scope_books(conn: sqlite3.Connection, pattern: str) -> set[int]:
-    """Books matching `pattern`, by glob or substring, on title or path.
-
-    One pattern covers the cases that matter: a shelf (`-c neuroscience/`, the
-    directory books were added from), a single work (`-c Kandel`), or a related
-    set (`-c "*Imaging*"`). Matching is case-insensitive.
-    """
+def _matches(pattern: str, title: str, key: str) -> bool:
+    """One pattern against one book, by glob or substring, case-insensitively."""
     needle = pattern.lower()
-    globbing = any(c in pattern for c in "*?[")
-    matched = set()
+    if any(c in pattern for c in "*?["):
+        return fnmatch.fnmatch(title, needle) or fnmatch.fnmatch(key, needle)
+    return needle in title or needle in key
+
+
+def scope(conn: sqlite3.Connection,
+          patterns: str | Iterable[str]) -> tuple[set[int], list[str]]:
+    """Books matching **any** pattern, and the patterns that matched none.
+
+    One pattern covers what a person types: a shelf (`-c neuroscience/`, the
+    directory books were added from), a single work (`-c Kandel`), or a related
+    set (`-c "*Imaging*"`). Several cover what a person *selects* — a checkbox
+    list of books is not expressible as one glob without synthesising one that
+    is eventually wrong, so the scope is a union instead.
+
+    The misses come back rather than being swallowed. Under a union a mistyped
+    pattern contributes nothing and changes no result, so it is invisible in a
+    way a single pattern never was — and `-c` is a promise about which books
+    were ranked, so a pattern that turned out to mean no book has to be said.
+    """
+    wanted = [patterns] if isinstance(patterns, str) else list(patterns)
+    matched: set[int] = set()
+    hit = {pattern: False for pattern in wanted}
     for row in conn.execute("SELECT id, title, key FROM books"):
         title, key = row["title"].lower(), row["key"].lower()
-        if globbing:
-            if fnmatch.fnmatch(title, needle) or fnmatch.fnmatch(key, needle):
+        for pattern in wanted:
+            if _matches(pattern, title, key):
                 matched.add(row["id"])
-        elif needle in title or needle in key:
-            matched.add(row["id"])
-    return matched
+                hit[pattern] = True
+    return matched, [pattern for pattern in wanted if not hit[pattern]]
+
+
+def scope_books(conn: sqlite3.Connection,
+                patterns: str | Iterable[str]) -> set[int]:
+    """The union alone, for the callers that only bind a query to some books."""
+    return scope(conn, patterns)[0]
 
 
 def embedded_ranges(

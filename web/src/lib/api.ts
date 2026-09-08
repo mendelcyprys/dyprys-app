@@ -84,6 +84,28 @@ export interface Libraries {
   registry_readable: boolean;
 }
 
+export interface BookSource {
+  ordinal: number;
+  path: string;
+  size_bytes: number;
+  /** False: the file is gone. The chunks remain, and search returns text: null. */
+  present: boolean;
+}
+
+export interface BookRow {
+  title: string;
+  /** The path. The only thing that says *which* book — titles collide. */
+  key: string;
+  chunks: number;
+  lexical_indexed: number;
+  sources: BookSource[];
+  chunkings: { id: number; target: number; overlap: number; chunks: number }[];
+  /** Chunks this model has embedded, by model name. */
+  embedded: Record<string, number>;
+  /** Chunks this model *could* embed — its own chunking, not the library's. */
+  live_chunks: Record<string, number>;
+}
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -106,6 +128,13 @@ export const api = {
 
   /** The library's NOTES.md, raw. Rendered, never interpreted. */
   notes: (name: string) => request<string>(`/libraries/${encodeURIComponent(name)}/notes`),
+
+  books: (name: string, pattern?: string) =>
+    request<{ books: BookRow[] }>(
+      `/libraries/${encodeURIComponent(name)}/books${
+        pattern ? `?pattern=${encodeURIComponent(pattern)}` : ""
+      }`,
+    ),
 
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
 

@@ -469,3 +469,45 @@ def test_the_default_can_be_moved_and_is_the_same_default_the_cli_reads(registry
     assert moved.status_code == 200
     assert {row["name"] for row in moved.json()["libraries"] if row["default"]} == {"two"}
     assert registry.resolve(None) == tmp_path / "two"
+
+
+def test_a_scope_can_be_a_list_of_books_over_http(client, index):
+    """What a checkbox list sends. `collection` is `str | list[str]`.
+
+    A UI cannot honestly turn several selected books into one glob, so the
+    request carries them as they were picked and the server unions them.
+    """
+    directory, _ = index
+    from dyprys import db
+
+    conn = db.connect(directory)
+    titles = [row["title"] for row in conn.execute("SELECT title FROM books ORDER BY id")]
+    conn.close()
+
+    answered = ask(client, collection=titles)
+    assert answered.status_code == 200
+
+    one = ask(client, collection=[titles[0]])
+    assert one.status_code == 200
+    assert {row["book"] for row in one.json()["results"]
+            if "phrase" not in row["provenance"]} == {titles[0]}
+
+
+def test_a_pattern_that_matches_nothing_is_still_a_404_inside_a_list(client, index):
+    """The refusal a union would otherwise swallow.
+
+    404 rather than 200-with-fewer-books: the request named something this index
+    does not hold, and a UI that dropped a book from a checkbox list would
+    otherwise show a narrowed search that looks complete.
+    """
+    directory, _ = index
+    from dyprys import db
+
+    conn = db.connect(directory)
+    first = conn.execute("SELECT title FROM books ORDER BY id").fetchone()["title"]
+    conn.close()
+
+    refused = ask(client, collection=[first, "no-such-shelf"])
+
+    assert refused.status_code == 404
+    assert "no-such-shelf" in refused.json()["detail"]

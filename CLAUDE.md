@@ -55,6 +55,7 @@ its rank is a hint, not a verdict.
 | asks in everyday words about a technical library | add `--expand MODEL` | rewrites the query into the library's vocabulary; ~4 s |
 | wants a written answer, not passages | add `--summarise MODEL` | drafts prose; every quote is checked against the source |
 | means one shelf / author / book | add `-c PATTERN` | matches title or path, case-insensitive |
+| means several books they picked | repeat `-c` | the patterns are a union; each must match something |
 | wants the right passage **ranked first** | add `--rerank` | a cross-encoder rescores what was already found; buys rank, not recall |
 
 Defaults are deliberately fast and literal-safe. Reach for `--expand` and

@@ -8,13 +8,20 @@ import { useHealth } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
 import { LibraryPicker } from "./library-picker";
 import { NotesDialog } from "./notes";
+import { Scope } from "./scope";
 
 /**
  * The state of the question: which library, and (later) which model and which
  * books. It sits outside the tabs because those three choices outlive any one
  * search, and every tab means something different depending on them.
  */
-export function Rail({ libraries }: { libraries: Libraries }) {
+export function Rail({
+  libraries,
+  onEditScope,
+}: {
+  libraries: Libraries;
+  onEditScope: () => void;
+}) {
   const { library, select } = useSelection();
   const [notesOpen, setNotesOpen] = React.useState(false);
   const health = useHealth();
@@ -29,6 +36,8 @@ export function Rail({ libraries }: { libraries: Libraries }) {
       </div>
 
       <LibraryPicker libraries={libraries.libraries} selected={library} onSelect={(name) => select(name || null)} />
+
+      {current?.exists && <Scope onEdit={onEditScope} />}
 
       {current?.exists && (
         <div className="space-y-3">

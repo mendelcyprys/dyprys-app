@@ -306,3 +306,71 @@ def test_a_summariser_retry_does_not_rewrite_what_the_search_returned(session, m
             f"chunk {passage.chunk_id} was returned with provenance belonging "
             f"to a different search")
         assert passage.chunk_id in result.cosine
+
+
+# --------------------------------------------------------------------------
+# Scoping to several books
+# --------------------------------------------------------------------------
+#
+# `collection` was one pattern, and a checkbox list of books is not expressible
+# as one glob without synthesising one that is eventually wrong. These pin the
+# union and, more importantly, the thing a union makes easy to lose: a pattern
+# that turned out to mean no book.
+
+
+def test_several_patterns_are_a_union(session):
+    """Naming both books ranks both; naming one ranks fewer."""
+    from dyprys.search import scope
+
+    both, missed = scope(session.conn, ["book0", "book1"])
+    only, _ = scope(session.conn, "book0")
+
+    assert missed == []
+    assert only < both, "a second pattern did not widen the scope"
+    assert both == only | scope(session.conn, "book1")[0]
+
+
+def test_one_pattern_still_reads_as_one_pattern(session):
+    """A bare string is not iterated character by character.
+
+    The obvious implementation of "accept a list too" turns `-c "book0"` into
+    six one-letter patterns, which match nothing and match everything by turns.
+    """
+    from dyprys.search import scope
+
+    matched, missed = scope(session.conn, "book0")
+
+    assert matched and missed == []
+
+
+def test_a_pattern_matching_nothing_is_an_error_even_when_another_matched(session):
+    """The failure a union introduces, and the reason `scope` returns misses.
+
+    With one pattern, typing it wrong meant no books and an error. Under a union
+    it contributes nothing and changes no result — so the search silently
+    narrows to whatever the *other* patterns meant, at exit 0, with citations
+    that look correct. `-c` is a promise about which books were ranked.
+    """
+    with pytest.raises(errors.NoSuchBook) as caught:
+        service.search(session, "neurons",
+                       service.SearchOptions(collection=["book0", "no-such-shelf"]))
+
+    assert "no-such-shelf" in caught.value.message
+    assert "book0" not in caught.value.message, (
+        "the message should name the pattern that failed, not the one that worked")
+
+
+def test_a_union_scope_confines_the_ranking_half(session):
+    """Same promise as one pattern, and the same leg is allowed to escape it.
+
+    Only the exact-phrase leg may leave the scope — deliberate, measured, and
+    pinned by `test_ask_pipeline_contract.py`. Anything else from outside is a
+    real leak, and a union is exactly where one would appear unnoticed.
+    """
+    result = service.search(session, "synapses concerning neurons",
+                            service.SearchOptions(collection=["book0"], k=5))
+
+    outside = [p for p in result.passages
+               if "book0" not in str(p.path)
+               and "phrase" not in (result.why.get(p.chunk_id) or "")]
+    assert not outside, f"a scoped search ranked passages from {outside}"

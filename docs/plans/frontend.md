@@ -99,7 +99,7 @@ on every other route), and a name already taken is a refusal carrying the taken
 names rather than `registry.add`'s silent overwrite. `--delete`, which erases an
 index directory, deliberately has no route. See `docs/serving.md`.
 
-## Phase 2 — Books: what is in here, and what am I asking
+## Phase 2 — Books: what is in here, and what am I asking  ✅ built
 
 The Books tab, and the scope control in the rail. This is the phase that changes
 what a search *is*, so it comes before making search pretty.
@@ -119,15 +119,21 @@ what a search *is*, so it comes before making search pretty.
   title, and the reader header shows the path, always.
 
 **Selecting what to query.** Checkboxes in this table feed the rail's scope
-chip: "3 books" / "shelf: neuroscience/" / "whole library".
+chips. A selected book contributes its **path**, which is unique where a title
+is not; the filter box can also be promoted to a scope as one pattern, which is
+the difference between "these four books" and "the Talmud shelf, whatever is on
+it". The chips live in the rail rather than on this tab because a scope you
+cannot see from where you type is one you forget you set.
 
-This is the one place the plan asks for a **service change rather than a UI
-trick**. `SearchOptions.collection` is a single pattern, and `scope_books` turns
-it into a set of book ids. A multi-select cannot be expressed as one pattern
-without synthesising a glob that will eventually be wrong. So:
+This was the one place the plan asked for a **service change rather than a UI
+trick**, and it was taken: `collection` is now `str | list[str]`, `search.scope`
+unions the matches, and `-c` is repeatable. The API needed no new field.
 
-> Make `collection` accept `str | list[str]` and union the matches. One change in
-> `service`, argparse gets a repeatable `-c`, and the API needs no new field.
+One thing the union introduced that a single pattern never had: a mistyped
+pattern beside a good one contributes no books and changes no result, so it
+would narrow the search invisibly, at exit 0, with citations that look correct.
+So `scope` returns the patterns that matched nothing and the search refuses on
+**any** miss, not only when everything missed.
 
 **And the scope must be honest in the UI.** `test_ask_pipeline_contract.py`
 pins deliberate behaviour: the exact-phrase leg searches the whole library even
@@ -248,7 +254,6 @@ because two of them change `service`:
 | need | phase | shape |
 |---|---|---|
 | register / forget a library | 1 | `POST`/`DELETE /api/libraries` — or a deliberate decision to leave it to the CLI |
-| scope to several books | 2 | `collection: str \| list[str]`, unioned in `service` |
 | choose a reranker without typing a path | 3 | `GET /api/models/available` listing `*.gguf` on the machine |
 | set a model alias | 3 | `POST /api/libraries/{name}/models/{model}/alias` |
 | cancel an in-flight search | 4 | the stream's disconnect is currently not observed; the worker runs on |

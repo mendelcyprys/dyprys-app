@@ -5,11 +5,12 @@ import { useLibraries } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
 import { Rail } from "@/rail/rail";
 import { NothingRegistered, RegistryUnreadable, ServerUnreachable } from "@/screens/blocked";
-import { Workspace } from "@/screens/workspace";
+import { Workspace, type Tab } from "@/screens/workspace";
 
 export function App() {
   const libraries = useLibraries();
   const { library, select } = useSelection();
+  const [tab, setTab] = React.useState<Tab>("Ask");
 
   // The remembered library may have been forgotten, renamed, or its drive
   // unmounted since this tab last looked. Fall back to the default rather than
@@ -44,9 +45,9 @@ export function App() {
   return (
     <Shell>
       <div className="flex h-full">
-        <Rail libraries={libraries.data} />
+        <Rail libraries={libraries.data} onEditScope={() => setTab("Books")} />
         {current?.exists ? (
-          <Workspace library={current} />
+          <Workspace library={current} tab={tab} onTab={setTab} />
         ) : (
           <main className="flex flex-1 items-center justify-center p-10 text-sm text-muted-foreground">
             Choose a library whose index is present.

@@ -41,3 +41,19 @@ export function useRegistryWrite() {
     makeDefault: useMutation({ mutationFn: api.makeDefault, onSuccess: seed }),
   };
 }
+
+/**
+ * What is in a library.
+ *
+ * `pattern` goes to the server rather than being filtered here, so the filter
+ * box and `-c` are one matcher: what you type to find a book is what selecting
+ * it will mean. Debouncing is the caller's job — this only caches.
+ */
+export function useBooks(library: string | null, pattern: string) {
+  return useQuery({
+    queryKey: ["books", library, pattern] as const,
+    queryFn: () => api.books(library!, pattern || undefined),
+    enabled: Boolean(library),
+    placeholderData: (previous) => previous,
+  });
+}

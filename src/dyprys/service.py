@@ -296,7 +296,7 @@ class SearchOptions:
     k: int = 5
     mode: str = "hybrid"
     model: str | None = None
-    collection: str | None = None
+    collection: str | list[str] | None = None
     route: int = 0
     rerank: int = 0
     depth: int = 0
@@ -789,14 +789,19 @@ def search(session: Session, question: str, options: SearchOptions | None = None
 
     embedder, model_id, store = session.model(options.model)
 
-    from dyprys.search import resolve, scanned_fraction, scope_books
+    from dyprys.search import resolve, scanned_fraction, scope
 
     books = None
     if options.collection:
-        books = scope_books(conn, options.collection)
-        if not books:
+        books, missed = scope(conn, options.collection)
+        # Every miss, not only the case where nothing matched at all. Under a
+        # union a mistyped pattern contributes no books and changes no result,
+        # so it would otherwise narrow the search silently -- and `-c` is a
+        # promise about which books were ranked.
+        if missed:
+            named = ", ".join(repr(pattern) for pattern in missed)
             raise errors.NoSuchBook(
-                f"no book matches {options.collection!r}; try `dyp books`")
+                f"no book matches {named}; try `dyp books`")
 
     router, warnings = _router(conn, session.directory, embedder, model_id,
                                options.route, books)
