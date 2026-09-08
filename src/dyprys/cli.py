@@ -35,7 +35,7 @@ _WHY_NO_TEXT = {
 }
 
 
-# Eighteen commands listed alphabetically tell a new reader nothing about which
+# Nineteen commands listed alphabetically tell a new reader nothing about which
 # three they need today. argparse cannot group subcommands, so the flat listing
 # is replaced by this, ordered by when in a library's life you reach for it.
 COMMAND_GROUPS = """\
@@ -65,6 +65,8 @@ commands, in the order a library needs them
   more than one         library  name and switch between indexes
                         backup   wrap an index and its text into one archive
                         restore  unpack one into an empty directory
+
+  from a browser        serve    the same searches over HTTP, for a web UI
 
 `dyp COMMAND --help` for the flags of any of these.
 """
@@ -348,8 +350,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="re-hash every file instead of trusting size and mtime",
     )
 
+    sv = sub.add_parser("serve", help="the same searches over HTTP, for a web UI")
+    sv.add_argument("--host", default="127.0.0.1",
+                    help="interface to bind (default 127.0.0.1 — this machine only)")
+    sv.add_argument("--port", type=int, default=8765, help="port (default 8765)")
+    sv.add_argument("--origin", action="append", metavar="URL",
+                    help="allow a browser origin to call this server; repeatable "
+                         "(default http://localhost:5173, which is Vite's)")
+    sv.add_argument("--web", type=Path, metavar="DIR",
+                    help="also serve a built frontend from DIR — optional, and "
+                         "the API is fully usable without one")
+    sv.add_argument("--keep", type=int, default=2, metavar="N",
+                    help="warm embedding models to hold per library (default 2). "
+                         "Each is 300 MB to 1 GB resident.")
+
     # The grouped epilog above is the listing; argparse's own flat one would
-    # print all eighteen a second time. The per-command `help=` strings are kept
+    # print all nineteen a second time. The per-command `help=` strings are kept
     # rather than SUPPRESSed, so shell completion and any other tool reading the
     # parser still sees them.
     listing = getattr(sub, "_choices_actions", None)
@@ -405,6 +421,8 @@ def _explain(failed: errors.DyprysError) -> str:
 def _dispatch(args, parser) -> int:
     if args.command == "library":
         return _library(args, parser)
+    if args.command == "serve":
+        return _serve(args)
 
     # Resolved once, into a local. `_where` used to be called here and eight
     # more times below, which was harmless while it exited the process and is
@@ -2553,6 +2571,47 @@ def _status(conn, as_json: bool = False, directory=None) -> int:
             print(f"  {_ago(e['at']):>9}  {e['action']:<9} {e['detail']}")
         print("  `dyp history` for more")
     _say_next(conn)
+    return 0
+
+
+def _serve(args) -> int:
+    """Run the HTTP frontend until interrupted.
+
+    Imported here rather than at the top of the module because FastAPI and
+    uvicorn are an optional extra: core `dyp` has two runtime dependencies and
+    someone who never opens a browser should not install a web framework to run
+    a search.
+
+    Binds 127.0.0.1 by default. There is no authentication — this is one
+    person's library on one machine — so binding a public interface would put
+    an unauthenticated file reader on the network.
+    """
+    try:
+        import uvicorn
+
+        from dyprys.api import create_app
+    except ImportError as missing:
+        print(f"`dyp serve` needs the web extras ({missing.name} is not installed).",
+              file=sys.stderr)
+        print("  pip install 'dyprys[api]'   — or  uv pip install -e '.[api]'",
+              file=sys.stderr)
+        return 2
+
+    web = args.web
+    if web and not Path(web).is_dir():
+        # Said rather than crashed. There is no `web/` scaffold in this repo, so
+        # a wrong path here is a likely mistake and the API alone is still the
+        # whole product.
+        print(f"no directory at {web} — serving the API only", file=sys.stderr)
+        web = None
+    app = create_app(origins=args.origin, web=web, keep=args.keep)
+    where = f"http://{args.host}:{args.port}"
+    print(f"dyprys on {where}", file=sys.stderr)
+    print(f"  {where}/api/libraries   ·   {where}/docs", file=sys.stderr)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"  bound to {args.host}: anyone who can reach it can read this "
+              f"library, and there is no password.", file=sys.stderr)
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0
 
 
