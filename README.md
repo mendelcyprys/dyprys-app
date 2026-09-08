@@ -278,7 +278,6 @@ src/dyprys/
 tests/           pytest — 713 tests
 CLAUDE.md        the operator's decision manual, loaded by an agent
 docs/            deeper operational reference, linked on-demand from CLAUDE.md
-demo.html        a self-contained visual overview — open it in a browser
 ```
 
 **The split is by I/O, not by topic** — the pure functions (chunking, fusion,
