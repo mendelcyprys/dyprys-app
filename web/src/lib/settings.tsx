@@ -21,6 +21,9 @@ export interface Settings {
   model: string | null;
   reranker: string | null;
   expander: string | null;
+  /** Draft prose from the passages. Off by default: it costs seconds. */
+  summarise: boolean;
+  /** Which model drafts it. Null means whatever the library remembers. */
   summariser: string | null;
   effort: Effort;
 }
@@ -29,6 +32,7 @@ const EMPTY: Settings = {
   model: null,
   reranker: null,
   expander: null,
+  summarise: false,
   summariser: null,
   effort: "fast",
 };

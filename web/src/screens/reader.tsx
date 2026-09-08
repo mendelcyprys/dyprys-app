@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronDown, ChevronUp, Copy, ExternalLink } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -40,6 +40,7 @@ export function Reader({
   // start of a 16 MB file) and showed it for a beat before an effect corrected.
   const [moved, setMoved] = React.useState<number | null>(null);
   const [copied, setCopied] = React.useState(false);
+  const [copiedPath, setCopiedPath] = React.useState(false);
   const offset = moved ?? reading?.offset ?? 0;
 
   React.useEffect(() => setMoved(null), [reading?.path, reading?.offset]);
@@ -93,11 +94,21 @@ export function Reader({
           <Button size="sm" variant="ghost" onClick={() => setMoved(offset + SPAN)}>
             <ChevronDown /> Later
           </Button>
-          <Tooltip label="the file itself, in whatever opens .txt here">
-            <Button size="sm" variant="ghost" asChild>
-              <a href={`file://${reading?.path ?? ""}`} target="_blank" rel="noreferrer">
-                <ExternalLink />
-              </a>
+          <Tooltip label="the path alone, to open the file yourself">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                // The path, not `path:offset`: this one is for a terminal or a
+                // file dialog. A `file://` link would be the obvious control
+                // here and is inert -- a page served over http may not navigate
+                // to one, silently -- so it is a copy button instead.
+                navigator.clipboard?.writeText(reading?.path ?? "");
+                setCopiedPath(true);
+                window.setTimeout(() => setCopiedPath(false), 1500);
+              }}
+            >
+              {copiedPath ? "Path copied" : "Copy path"}
             </Button>
           </Tooltip>
         </div>

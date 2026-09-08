@@ -277,6 +277,35 @@ button is safe to offer. `?force=true` escalates to SIGTERM.
 Logs land in `INDEX/.jobs/<kind>-<stamp>.log`; `GET /jobs/{kind}?tail=N` returns
 the end of the most recent one.
 
+## A search nobody is waiting for
+
+A search runs on the one worker thread its library has, so a search nobody is
+waiting for is a search the next caller is queued behind. That is not
+hypothetical: rescoring 20 candidates is 25.7s of a 25.9s reranked search, and a
+browser tab closed after three seconds used to hold the thread for the other
+twenty-three.
+
+`POST /ask/stream` observes the client going away — Starlette closes the
+response generator, which is the one moment the server is told — and marks the
+search abandoned. The search then stops **at its next checkpoint**: cooperative
+because it has to be, since the work is on a worker thread and a Python thread
+cannot be killed from outside. The checkpoints sit before each expensive stage
+(expanding, loading a cross-encoder, scanning, summarising) and, most
+importantly, *inside* the per-passage rescoring loop, because that is where the
+time actually goes. Hanging up mid-search takes the next search from 28.0s to
+1.7s.
+
+`Progress.cancelled()` is the seam, and it is False on the base class — so a
+terminal search is unaffected, its asker being the process itself. An abandoned
+search raises `Abandoned` and records nothing, which is right: it has no answer
+to record.
+
+The reranker is held between requests like the embedder, keyed by path and under
+the same `--keep` budget. `_reranker_for` had always accepted an already-loaded
+object — its comment named "a warm server cache" — and nothing ever filled one,
+so every reranked request read a 600 MB GGUF off disk. `GET /api/health` lists
+it alongside the embedding models.
+
 ## Failures
 
 One handler, one shape:

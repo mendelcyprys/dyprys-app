@@ -18,7 +18,10 @@ class StubReranker:
     def __init__(self):
         self.calls = []
 
-    def score(self, query, passages):
+    def score(self, query, passages, progress=None):
+        # `progress` is asked between passages whether anyone is still waiting;
+        # a stub that scores instantly has nothing to check, but it has to
+        # accept the argument or it is no longer the same interface.
         self.calls.append((query, len(passages)))
         words = query.lower().split()
         return [sum(p.lower().count(w) for w in words) / (len(p) or 1) for p in passages]
@@ -157,3 +160,54 @@ def test_cli_rerank_default_matches_the_module():
     assert {int(h) for h in helps} == {DEFAULT_DEPTH}, (
         f"--rerank help says {helps}, rerank.DEFAULT_DEPTH is {DEFAULT_DEPTH}"
     )
+
+
+def test_rescoring_stops_when_nobody_is_waiting():
+    """The loop where a stop button either works or does not.
+
+    Exercised against the real `Reranker.score` rather than `StubReranker`,
+    because the checkpoint lives in the loop that costs the time and a stub that
+    scores instantly replaces exactly that loop -- testing it through the stub
+    would assert only that the stub was written to pass.
+
+    Measured on a real corpus, rescoring 20 passages is 25.7s of the 25.9s a
+    reranked search takes, so a checkpoint anywhere else in the pipeline never
+    fires while the search is actually slow. Hanging up mid-search took the
+    *next* search from 28.0s to 1.7s once this was here.
+    """
+    from dyprys import errors
+    from dyprys.progress import Progress
+    from dyprys.rerank import Reranker
+
+    class GoneAfter(Progress):
+        def __init__(self, after):
+            self.after, self.asked = after, 0
+
+        def event(self, event):
+            pass
+
+        def cancelled(self):
+            self.asked += 1
+            return self.asked > self.after
+
+    class Weights:
+        def __init__(self):
+            self.scored = 0
+
+        def embed(self, _text):
+            self.scored += 1
+            return [0.5]
+
+    # Built without a GGUF: `score` needs the template and the weights, and
+    # loading half a gigabyte to assert a loop counter would be absurd.
+    reranker = object.__new__(Reranker)
+    reranker._llm = Weights()
+    reranker.template = "{query} {passage}"
+
+    say = GoneAfter(after=2)
+    with pytest.raises(errors.Abandoned):
+        reranker.score("neurons", ["one", "two", "three", "four", "five"], say)
+
+    assert reranker._llm.scored == 2, (
+        f"scored {reranker._llm.scored} passages after being abandoned at 2 -- "
+        f"the check must sit inside the per-passage loop, not around it")

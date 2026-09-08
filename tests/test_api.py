@@ -696,3 +696,33 @@ def test_a_stale_marker_attributes_nothing(client, index, monkeypatch):
     assert body["route"]["holder_kind"] is None
     assert body["route"]["running"] is False
     assert body["embed"]["running"] is True, "an unknown holder falls back to embed"
+
+
+def test_a_dropped_stream_marks_the_search_abandoned(client):
+    """The one moment the server is told nobody is listening.
+
+    Starlette closes the response generator when the client goes away, and that
+    is what `finally` catches — there is no other signal. It matters because a
+    library has one worker thread: a search nobody wants otherwise holds it
+    while the next question queues behind a closed tab.
+    """
+    from dyprys import progress as progress_mod
+
+    marked: list = []
+    real = progress_mod.Queue.abandon
+
+    def watch(self):
+        marked.append(self)
+        real(self)
+
+    progress_mod.Queue.abandon = watch
+    try:
+        with client.stream("POST", "/api/libraries/test/ask/stream",
+                           json={"question": "neurons and synapses"}) as answering:
+            # Read nothing and leave: the generator is closed on the way out.
+            assert answering.status_code == 200
+    finally:
+        progress_mod.Queue.abandon = real
+
+    assert marked, "the stream ended without telling the search that it had"
+    assert marked[0].cancelled() is True

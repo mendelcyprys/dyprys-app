@@ -88,6 +88,19 @@ class NoSuchBook(DyprysError):
     exit_code = 1
 
 
+class Abandoned(DyprysError):
+    """Whoever asked stopped listening, so the search stopped working.
+
+    Not a fault: the answer had nowhere to go. It matters because a search runs
+    on the one worker thread that library has, so a search nobody is waiting for
+    is a search the next one is queued behind -- and a rescoring or a summary
+    can hold that thread for half a minute after the browser tab that asked for
+    it has closed.
+    """
+
+    exit_code = 1
+
+
 class NothingEmbedded(DyprysError):
     """Text has been added but no vectors exist yet."""
 

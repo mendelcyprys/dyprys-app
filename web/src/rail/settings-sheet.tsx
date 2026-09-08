@@ -23,12 +23,16 @@ const EFFORT: { value: Effort; label: string; detail: string }[] = [
   {
     value: "expand",
     label: "Expand",
-    detail: "rewrite the query into the library’s words (~4s)",
+    detail: "rewrite the query into the library’s words, then search",
   },
   {
     value: "rerank",
     label: "Rerank",
-    detail: "a cross-encoder rescores what was found (~9s)",
+    // No figure: the cost is one pass of a cross-encoder per candidate, so it
+    // is set by the depth, the model and the machine rather than by the
+    // feature. Measured here at 25.7s for 20 passages against a 0.6B reranker;
+    // quoting a number the page cannot know is worse than quoting none.
+    detail: "a cross-encoder rescores every candidate — seconds per passage",
   },
 ];
 
@@ -121,33 +125,64 @@ export function SettingsSheet({ library }: { library: string }) {
           </section>
 
           <section className="space-y-3">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-medium">Draft an answer</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Prose instead of passages, with every quotation checked against the text it cites.
+                  It costs seconds, and the passages are the result either way — so it is a switch
+                  rather than something left on.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.summarise}
+                onClick={() => update({ summarise: !settings.summarise })}
+                className={cn(
+                  "mt-1 flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+                  settings.summarise ? "border-primary bg-primary" : "border-input bg-muted",
+                )}
+              >
+                <span
+                  className={cn(
+                    "block size-3.5 rounded-full bg-background transition-transform",
+                    settings.summarise ? "translate-x-[1.15rem]" : "translate-x-[0.15rem]",
+                  )}
+                />
+              </button>
+            </div>
+
+            {settings.summarise && (
+              <label className="block space-y-1">
+                <span className="text-xs text-muted-foreground">which model — an ollama name</span>
+                <Input
+                  value={settings.summariser ?? ""}
+                  onChange={(event) => update({ summariser: event.target.value || null })}
+                  placeholder="whatever this library remembers"
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                />
+              </label>
+            )}
+          </section>
+
+          <section className="space-y-3">
             <div>
-              <h3 className="text-sm font-medium">Expander and summariser</h3>
+              <h3 className="text-sm font-medium">Expander</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                Ollama model names. Left empty, the library’s own remembered choice is used — which
-                is usually the right answer, and is why these are text rather than a picker.
+                An ollama model name, used only when Effort is set to Expand. Left empty, the
+                library’s own remembered choice is used — usually the right answer, and why this is
+                text rather than a picker.
               </p>
             </div>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">expander</span>
-              <Input
-                value={settings.expander ?? ""}
-                onChange={(event) => update({ expander: event.target.value || null })}
-                placeholder="whatever this library remembers"
-                spellCheck={false}
-                className="font-mono text-xs"
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">summariser</span>
-              <Input
-                value={settings.summariser ?? ""}
-                onChange={(event) => update({ summariser: event.target.value || null })}
-                placeholder="whatever this library remembers"
-                spellCheck={false}
-                className="font-mono text-xs"
-              />
-            </label>
+            <Input
+              value={settings.expander ?? ""}
+              onChange={(event) => update({ expander: event.target.value || null })}
+              placeholder="whatever this library remembers"
+              spellCheck={false}
+              className="font-mono text-xs"
+            />
           </section>
         </div>
       </DialogContent>

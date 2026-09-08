@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from dyprys import term
+from dyprys import errors, term
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,27 @@ class Progress:
     def working(self, message: str, *, kind: str = "working") -> None:
         """Announced before a slow stage, so the wait has a name."""
         self.event(Event(kind, message))
+
+    def cancelled(self) -> bool:
+        """Whether whoever asked has stopped listening.
+
+        The same seam as `event`, asked the other way round: the pipeline cannot
+        know whether anyone is still there, and the frontend cannot know where
+        the pipeline has got to. False unless a frontend says otherwise, so a
+        terminal search -- where the asker is the process -- is unaffected.
+        """
+        return False
+
+    def check(self) -> None:
+        """Stop, if nobody is waiting. Called before each expensive stage.
+
+        Cooperative because it has to be: the work runs on a worker thread and a
+        Python thread cannot be killed from outside. So the stages that cost
+        seconds -- expanding, scanning, rescoring, summarising -- ask between
+        themselves whether the answer still has anywhere to go.
+        """
+        if self.cancelled():
+            raise errors.Abandoned("the search was abandoned before it finished")
 
 
 class Silent(Progress):
@@ -123,9 +144,21 @@ class Queue(Progress):
 
     def __init__(self, queue, loop=None):
         self.queue, self.loop = queue, loop
+        # Set from the loop's thread when the response generator closes, read
+        # from the worker thread between stages. A plain flag rather than an
+        # Event: nothing waits on it, and the only ordering that matters is that
+        # the write eventually becomes visible.
+        self._gone = False
 
     def event(self, event: Event) -> None:
         if self.loop is not None:
             self.loop.call_soon_threadsafe(self.queue.put_nowait, event)
         else:
             self.queue.put_nowait(event)
+
+    def abandon(self) -> None:
+        """Whoever asked has gone. The search may stop at its next checkpoint."""
+        self._gone = True
+
+    def cancelled(self) -> bool:
+        return self._gone

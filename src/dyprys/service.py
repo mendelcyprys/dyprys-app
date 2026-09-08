@@ -238,6 +238,12 @@ class Session:
         # memory budget rather than a cache policy -- a server left running
         # against a many-model index would otherwise hold all of them.
         self._models: dict[str, tuple] = {}
+        # The same budget for cross-encoders, kept separately because they are a
+        # different kind of model with a different key -- a filesystem path
+        # rather than an index handle -- and because evicting an embedder to
+        # make room for a reranker would trade the load a search always pays
+        # for the one it sometimes does.
+        self._rerankers: dict[str, object] = {}
         self.keep = max(1, keep)
 
     def model(self, name: str | None = None):
@@ -251,10 +257,31 @@ class Session:
                 self._models.pop(next(iter(self._models)))
         return self._models[key]
 
+    def reranker(self, path, load):
+        """The cross-encoder at `path`, loaded once and kept.
+
+        `_reranker_for` has always accepted an already-loaded object -- its
+        comment names "a warm server cache" -- and nothing ever filled one, so
+        every reranked request read a 600 MB GGUF off disk. Measured on `neuro`:
+        three identical reranked searches took 30.4s, 31.2s and 31.5s, nearly
+        all of it the load. Holding the embedder between requests is the whole
+        reason this class exists; the reranker was outside it by omission, and
+        it is the model CLAUDE.md tells a reader to reach for.
+        """
+        key = str(path)
+        if key in self._rerankers:
+            self._rerankers[key] = self._rerankers.pop(key)
+        else:
+            self._rerankers[key] = load()
+            while len(self._rerankers) > self.keep:
+                self._rerankers.pop(next(iter(self._rerankers)))
+        return self._rerankers[key]
+
     @property
     def loaded(self) -> list[str]:
         """Which models this session is holding in memory, for a health check."""
-        return [name or "(default)" for name in self._models]
+        return ([name or "(default)" for name in self._models]
+                + [Path(path).name for path in self._rerankers])
 
     def close(self) -> None:
         self.conn.close()
@@ -401,13 +428,18 @@ class Summary:
 # the one process it is running in.
 
 
-def _reranker_for(conn, options: SearchOptions, progress: Progress):
+def _reranker_for(conn, options: SearchOptions, progress: Progress, session=None):
     """The cross-encoder, or None when reranking was not asked for.
 
     The reranker is the one model the index does not remember, so this is the
     refusal users actually hit. It is a refusal and not a fallback on purpose:
     unreranked results returned to a caller who believes they were rescored is
     the worst of the three outcomes, because nothing about them says so.
+
+    `session` is where a loaded one is kept between requests. Optional because
+    the CLI has no session and no second request to keep it for -- it loads,
+    answers, and exits -- while a server that reloaded it every time would pay
+    a 600 MB read per search, which is more than the search itself costs.
     """
     if not options.rerank:
         return None
@@ -421,8 +453,11 @@ def _reranker_for(conn, options: SearchOptions, progress: Progress):
             "It needs a cross-encoder .gguf, not a chat model.", role="reranker")
     from dyprys.rerank import Reranker
 
-    progress.working(f"loading {Path(path).name} …", kind="loading")
-    return Reranker(path)
+    def load():
+        progress.working(f"loading {Path(path).name} …", kind="loading")
+        return Reranker(path)
+
+    return session.reranker(path, load) if session is not None else load()
 
 
 def _expander_for(conn, options: SearchOptions):
@@ -494,6 +529,10 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
         # and mixing the two would leave neither attributable.
         say = progress or Silent()
         note, working = say.note, say.working
+        # Before the first expensive thing, and again before each one after it.
+        # A search runs on the single worker thread its library has, so one
+        # nobody is waiting for is one the next caller is queued behind.
+        say.check()
         expansion = None
         if expander:
             working(f"rephrasing with {getattr(expander, 'model', 'a model')} …")
@@ -511,6 +550,7 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
                     note(kind, line[:120], indent=1)
             if expansion.empty:
                 note("nothing usable came back; searching as asked", indent=1)
+        say.check()
         vector = embedder.embed_query(question)
         scope = router(question, vector) if router else books
         if router and scope:
@@ -585,9 +625,11 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
         shortlist = sides[0] if len(sides) == 1 else reciprocal_rank_fusion(sides, k=want)
 
         if reranker:
+            say.check()
             working(f"rescoring {min(len(shortlist), want)} passages …")
             from dyprys.rerank import rerank
-            shortlist = rerank(conn, reranker, question, shortlist[:want], max(k * 4, k))
+            shortlist = rerank(conn, reranker, question, shortlist[:want],
+                               max(k * 4, k), say)
         if dedupe:
             from dyprys.search import drop_near_duplicates
             shortlist = drop_near_duplicates(conn, shortlist, k)
@@ -745,6 +787,7 @@ def summarise(session: Session, question: str, passages: list, model: str, *,
     # against the widened text is still exact: it is the text that was shown,
     # read from the file at a recorded byte.
     widened, spans = _widen(passages)
+    say.check()
     answer = summarise_mod.summarise(question, widened, talk)
     retried = failed = None
 
@@ -828,7 +871,11 @@ def search(session: Session, question: str, options: SearchOptions | None = None
                                options.route, books)
     for advisory in warnings:
         say.note(advisory.message, kind=advisory.kind)
-    reranker = _reranker_for(conn, options, say)
+    # Before loading a cross-encoder, which is the single longest thing a search
+    # ever does -- reading a 600 MB GGUF off disk, and uninterruptible once
+    # begun. Checking after it would be checking after the cost.
+    say.check()
+    reranker = _reranker_for(conn, options, say, session)
     expander = _expander_for(conn, options)
     summariser = _summariser_for(conn, options)
 

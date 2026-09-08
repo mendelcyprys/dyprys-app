@@ -64,7 +64,11 @@ export function Ask({ library }: { library: string }) {
       rerank: settings.effort === "rerank" ? RERANK_DEPTH : 0,
       reranker: settings.effort === "rerank" ? settings.reranker : null,
       expand: settings.effort === "expand" ? (settings.expander ?? true) : null,
-      summarise: settings.summariser ?? null,
+      // `bool | str` on purpose: true means "whatever this library remembers",
+      // a string names a model. Sending the name alone made an empty box mean
+      // "do not summarise" while the settings sheet said it meant "use the
+      // library's own choice" -- the two disagreed and the sheet was wrong.
+      summarise: settings.summarise ? (settings.summariser ?? true) : null,
     };
 
     try {
@@ -163,7 +167,9 @@ export function Ask({ library }: { library: string }) {
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
         <Badge variant="outline">{settings.effort}</Badge>
         {scope.length > 0 && <Badge variant="outline">{scope.length} books</Badge>}
-        {settings.summariser && <Badge variant="outline">summarised</Badge>}
+        {settings.summarise && (
+          <Badge variant="outline">{settings.summariser ?? "summarised"}</Badge>
+        )}
         {settings.effort === "rerank" && !settings.reranker && (
           // Bare rerank is a 503, not a downgrade — better said before the
           // search than after it.

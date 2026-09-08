@@ -48,7 +48,7 @@ dyp ask "..." --json         # machine-readable (schema below)
 dyp ask "..." -q             # results only, no stderr commentary
 dyp ask "..." --expand MODEL     # rewrite the query first (~4s; vocabulary bridge)
 dyp ask "..." --summarise MODEL  # draft prose, quotations verified (see below)
-dyp ask "..." --rerank --reranker FILE.gguf  # cross-encoder reorder (~9s)
+dyp ask "..." --rerank --reranker FILE.gguf  # cross-encoder reorder (see below)
 ```
 
 `--route` costs about one answer in twenty-five for a ~6x speedup — use it for a
@@ -58,6 +58,12 @@ and that holds for **each** pattern of a union, not just for all of them
 together. A mistyped pattern beside a good one contributes no books and changes
 no result, so it would otherwise narrow the search invisibly, at exit 0, with
 citations that look correct.
+
+**Reranking costs one model pass per candidate**, so its price is set by the
+depth, the reranker and the machine — not by the flag. Measured on `neuro` with
+a 0.6B cross-encoder: the retrieval itself is 0.2s, rescoring 5 candidates is
+7.7s and rescoring 20 is 25.7s. Reach for it when the ordering matters more than
+the half-minute, and prefer a smaller depth to skipping it entirely.
 
 `--rerank` rescores what the search already found, with a cross-encoder that
 reads query and passage together instead of comparing two vectors after the

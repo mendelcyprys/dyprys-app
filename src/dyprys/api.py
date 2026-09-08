@@ -423,11 +423,11 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         """
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue = asyncio.Queue()
+        say = progress_mod.Queue(queue, loop)
 
         def work(session):
             try:
-                last = {"result": _search(session, body,
-                                          progress_mod.Queue(queue, loop))}
+                last = {"result": _search(session, body, say)}
             except Exception as failure:   # including a DyprysError
                 last = as_error(failure)
             loop.call_soon_threadsafe(queue.put_nowait, last)
@@ -435,15 +435,25 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         indexes.submit(name, work)
 
         async def frames():
-            while True:
-                item = await queue.get()
-                if isinstance(item, Event):
-                    yield json.dumps({"stage": {
-                        "kind": item.kind, "label": item.label,
-                        "detail": item.detail, "indent": item.indent}}) + "\n"
-                    continue
-                yield json.dumps(item, ensure_ascii=False, default=str) + "\n"
-                return
+            # `finally` rather than a disconnect poll: when the client goes
+            # away, Starlette closes this generator, which is the one moment we
+            # are told. Marking the search abandoned lets it stop at its next
+            # checkpoint — it cannot be killed, because it is a worker thread —
+            # and that matters because each library has exactly one such thread.
+            # A rescoring nobody is waiting for otherwise holds it for half a
+            # minute while the next question queues behind a dead tab.
+            try:
+                while True:
+                    item = await queue.get()
+                    if isinstance(item, Event):
+                        yield json.dumps({"stage": {
+                            "kind": item.kind, "label": item.label,
+                            "detail": item.detail, "indent": item.indent}}) + "\n"
+                        continue
+                    yield json.dumps(item, ensure_ascii=False, default=str) + "\n"
+                    return
+            finally:
+                say.abandon()
 
         return StreamingResponse(frames(), media_type="application/x-ndjson")
 

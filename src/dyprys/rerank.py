@@ -112,10 +112,19 @@ class Reranker:
         self.template = TEMPLATES[self.template_name]
         self.name = self.path.stem
 
-    def score(self, query: str, passages: list[str]) -> list[float]:
-        """One relevance score per passage, larger meaning more relevant."""
+    def score(self, query: str, passages: list[str], progress=None) -> list[float]:
+        """One relevance score per passage, larger meaning more relevant.
+
+        `progress` is asked between passages whether anyone is still waiting.
+        This is the loop that makes a stop button honest: measured on `neuro`,
+        rescoring 20 passages is 25.7s of the 25.9s a reranked search takes, so
+        a checkpoint anywhere else in the pipeline is a checkpoint that never
+        fires while the search is actually slow.
+        """
         out = []
         for passage in passages:
+            if progress is not None:
+                progress.check()
             raw = self._llm.embed(self.template.format(query=query, passage=passage))
             while isinstance(raw, list):
                 raw = raw[0]
@@ -148,6 +157,7 @@ def rerank(
     query: str,
     hits: list[Hit],
     k: int = 5,
+    progress=None,
 ) -> list[Hit]:
     """Reorder `hits` by cross-encoder score and return the best `k`.
 
@@ -163,7 +173,7 @@ def rerank(
     if not readable:
         return hits[:k]
 
-    scores = reranker.score(query, [text for _, text in readable])
+    scores = reranker.score(query, [text for _, text in readable], progress)
     scored = [Hit(hit.chunk_id, score) for (hit, _), score in zip(readable, scores)]
     scored.sort(key=lambda h: -h.score)
 

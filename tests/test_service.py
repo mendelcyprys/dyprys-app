@@ -374,3 +374,67 @@ def test_a_union_scope_confines_the_ranking_half(session):
                if "book0" not in str(p.path)
                and "phrase" not in (result.why.get(p.chunk_id) or "")]
     assert not outside, f"a scoped search ranked passages from {outside}"
+
+
+# --------------------------------------------------------------------------
+# A search nobody is waiting for
+# --------------------------------------------------------------------------
+
+
+def test_a_search_stops_when_whoever_asked_has_gone(session):
+    """Cooperative, because a Python thread cannot be killed from outside.
+
+    This matters for one reason: each library gets a single worker thread, so a
+    search nobody is waiting for is a search the next caller is queued behind.
+    A rescoring holds that thread for half a minute after the tab that asked for
+    it has closed.
+    """
+    from dyprys.progress import Progress
+
+    class Gone(Progress):
+        def event(self, event):
+            pass
+
+        def cancelled(self):
+            return True
+
+    with pytest.raises(errors.Abandoned):
+        service.search(session, "neurons", service.SearchOptions(), progress=Gone())
+
+
+def test_a_terminal_search_is_never_abandoned(session):
+    """`cancelled` is False on the base class, so nothing changes for the CLI.
+
+    The asker there is the process: if it has gone, so has the search.
+    """
+    from dyprys.progress import Silent, Stderr
+
+    assert Silent().cancelled() is False
+    assert Stderr(on=False).cancelled() is False
+    # And a real search with the default progress still returns.
+    assert service.search(session, "neurons", service.SearchOptions()).passages
+
+
+def test_the_check_happens_before_the_expensive_stages_not_after(session):
+    """A checkpoint after the work has been done saves nothing.
+
+    Asserted by counting: the pipeline asks whether it should stop more than
+    once, because it is the stages *between* the checks that cost seconds.
+    """
+    from dyprys.progress import Progress
+
+    class Counting(Progress):
+        def __init__(self):
+            self.asked = 0
+
+        def event(self, event):
+            pass
+
+        def cancelled(self):
+            self.asked += 1
+            return False
+
+    say = Counting()
+    service.search(session, "neurons", service.SearchOptions(), progress=say)
+
+    assert say.asked >= 2, f"only {say.asked} checkpoint(s); one is barely cooperative"
