@@ -215,7 +215,7 @@ result it was checked against, and the "these passages do not answer the
 question" refusal rendered as a first-class answer rather than an error — it is
 the surest evidence the library lacks something.
 
-## Phase 5 — Jobs: build the library from the browser
+## Phase 5 — Jobs: build the library from the browser  ✅ built
 
 `GET /jobs`, `POST /jobs/{kind}`, `DELETE /jobs/{kind}`, and the log tail.
 

@@ -228,12 +228,28 @@ run the browser started; `GET /jobs` reports on one a terminal started.
 
 ```jsonc
 // GET /api/libraries/neuro/jobs/embed
-{"kind": "embed", "running": true, "pid": 43666,
+{"kind": "embed", "busy": true, "running": true, "holder_kind": "embed", "pid": 43666,
  "model": "hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc",
  "done": 64, "live": 960, "share": 0.067,
  "rate": 38.3, "eta_seconds": 23, "book_in_flight": "doc0",
  "log": "/path/.jobs/embed-20260908T112926.log"}
 ```
+
+**`busy` is about the index; `running` is about the kind.** Every kind takes the
+same lock — `compact` rewrites vector files and cannot run beside an embed
+either — so a held lock says this index is busy and, on its own, says nothing
+about *what* is busy. Reported per kind that made one run look like five, with
+one pid shared between them and four of the five wrong.
+
+`start` leaves a marker naming the kind and pid it spawned, and `holder_kind` is
+filled in when that pid is the one actually holding the lock. A stale marker
+attributes nothing. A run started from a terminal writes no marker, so it is an
+**unattributed holder**: `busy` everywhere, `holder_kind` null, and `running`
+reported under `embed` alone — the lock's name, and the only kind that runs long
+enough for anyone to be watching.
+
+A UI should say "this index is busy" once, from `busy`, rather than draw five
+running jobs.
 
 `rate` comes from the gap between *your own* polls, because a request cannot
 sleep to take a second sample. Until a second poll arrives it falls back to

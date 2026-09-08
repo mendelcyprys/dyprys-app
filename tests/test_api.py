@@ -637,3 +637,62 @@ def test_a_successful_retry_says_which_passages_it_is_about(client, monkeypatch)
     assert answered["answer"]["retried"] == "neurons and synapses"
     drawn = answered["answer"]["drawn_from"]
     assert drawn and all({"chunk_id", "book", "path", "offset"} <= set(row) for row in drawn)
+
+
+def test_one_held_lock_does_not_report_five_running_jobs(client, index):
+    """Every kind takes the same lock, so a held lock says the index is busy and
+    says nothing about *what* is busy.
+
+    Reported per kind, that made one run look like five, with one pid shared
+    between them and four of the five wrong. `busy` is the honest per-index
+    fact; `running` stays per kind.
+    """
+    directory, _ = index
+    from dyprys import lock
+
+    with lock.exclusive(directory, "embed"):
+        body = client.get("/api/libraries/test/jobs").json()
+
+    assert all(body[kind]["busy"] for kind in body), "the index is busy, whoever holds it"
+    assert [kind for kind in body if body[kind]["running"]] == ["embed"], (
+        "an unattributed holder belongs to embed alone — it is the lock's name, "
+        "and the only kind that runs long enough for anyone to be watching")
+
+
+def test_a_job_this_server_started_is_attributed_to_its_own_kind(client, index, monkeypatch):
+    """The marker `start` leaves, and the only thing that can tell route from embed.
+
+    Trusted only when the recorded pid is the pid actually holding the lock, so
+    a stale file attributes nothing and a run started from a terminal is an
+    unattributed holder rather than a misattributed one.
+    """
+    import os
+
+    from dyprys import jobs, lock
+
+    directory, _ = index
+    jobs.log_dir(directory).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(lock, "holder", lambda *a, **k: os.getpid())
+    jobs._remember(directory, jobs.JobRef("route", os.getpid(), directory / "x.log", "now"))
+
+    body = client.get("/api/libraries/test/jobs").json()
+
+    assert body["route"]["running"] is True
+    assert body["route"]["holder_kind"] == "route"
+    assert body["embed"]["running"] is False, "a route is not an embed"
+    assert body["embed"]["busy"] is True, "but the index is busy either way"
+
+
+def test_a_stale_marker_attributes_nothing(client, index, monkeypatch):
+    from dyprys import jobs, lock
+
+    directory, _ = index
+    jobs.log_dir(directory).mkdir(parents=True, exist_ok=True)
+    jobs._remember(directory, jobs.JobRef("route", 999_999, directory / "x.log", "now"))
+    monkeypatch.setattr(lock, "holder", lambda *a, **k: 4242)
+
+    body = client.get("/api/libraries/test/jobs").json()
+
+    assert body["route"]["holder_kind"] is None
+    assert body["route"]["running"] is False
+    assert body["embed"]["running"] is True, "an unknown holder falls back to embed"

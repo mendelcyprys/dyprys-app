@@ -39,7 +39,14 @@ and a settings sheet holding the reranker per library.
 **Ask and the reader** — the streamed search, the drafted answer with its quotes
 checked, and `GET /source` as a window around a passage.
 
-Jobs is phase 5 and is a stub.
+**Jobs** — a card per kind with the log tail, polled on an interval so `rate` is
+measured rather than guessed, a stop button that is safe because embedding is
+resumable, and a `route` prompt badged from `unprofiled_books` — the one failure
+that is invisible from a search's output.
+
+`embed` and `route` refuse to start on a multi-model index until a model is
+chosen, because a detached subprocess refuses by exiting a second after it
+starts, which over HTTP looks like a job that never ran.
 
 ## The rules this client is built to keep
 

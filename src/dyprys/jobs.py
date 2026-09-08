@@ -21,6 +21,7 @@ a stop button at all.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -139,7 +140,44 @@ def start(directory, kind: str = "embed", options: dict | None = None) -> JobRef
                                  start_new_session=True)
     finally:
         handle.close()
-    return JobRef(kind=kind, pid=child.pid, log=log, started_at=db.now())
+    ref = JobRef(kind=kind, pid=child.pid, log=log, started_at=db.now())
+    _remember(directory, ref)
+    return ref
+
+
+# Which kind this server last started, so `state` can attribute the lock.
+#
+# Every kind takes the same lock -- `compact` rewrites vector files and cannot
+# run beside an embed either -- so a held lock says the index is busy and says
+# nothing about *what* is busy. Without this, one run made all five kinds report
+# themselves as running, with the same pid, and four of those were lies.
+#
+# Only ever trusted when the recorded pid is the pid actually holding the lock,
+# so a stale file attributes nothing, and a run started from a terminal (which
+# writes no such file) is reported as an unattributed holder rather than
+# misattributed.
+RUNNING = "running.json"
+
+
+def _remember(directory: Path, ref: JobRef) -> None:
+    try:
+        (log_dir(directory) / RUNNING).write_text(
+            json.dumps({"kind": ref.kind, "pid": ref.pid, "at": ref.started_at}),
+            encoding="utf-8")
+    except OSError:
+        pass          # attribution is a nicety; failing to record it is not
+
+
+def _holder_kind(directory: Path, pid: int | None) -> str | None:
+    """The kind holding this index, when it can be known rather than guessed."""
+    if not pid or pid <= 0:
+        return None
+    try:
+        noted = json.loads((log_dir(directory) / RUNNING).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    kind = noted.get("kind")
+    return kind if noted.get("pid") == pid and kind in KINDS else None
 
 
 # The previous reading of a run's progress, per (index, model), so a polling
@@ -177,11 +215,20 @@ def state(conn, directory, kind: str = "embed") -> dict:
     """
     directory = Path(directory)
     pid = lock.holder(directory, LOCKS.get(kind, "embed"))
+    held = pid if (pid or 0) > 0 else None
+    doing = _holder_kind(directory, held)
     log = latest_log(directory, kind)
     answer = {
         "kind": kind,
-        "running": pid is not None,
-        "pid": pid if (pid or 0) > 0 else None,
+        # `busy` is about the index and is the same for every kind; `running` is
+        # about this kind. An unattributed holder is reported under `embed`,
+        # which is the lock's name and the only kind that runs long enough for
+        # anyone to be watching -- a `dyp embed` started from a terminal writes
+        # no marker here and must still be visible.
+        "busy": pid is not None,
+        "running": pid is not None and (doing == kind or (doing is None and kind == "embed")),
+        "holder_kind": doing,
+        "pid": held,
         "model": None, "done": None, "live": None, "share": None,
         "rate": None, "eta_seconds": None, "book_in_flight": None,
         "log": str(log) if log else None,

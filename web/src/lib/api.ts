@@ -213,6 +213,60 @@ export interface SourceWindow {
   text: string;
 }
 
+export type JobKind = "embed" | "add" | "route" | "lexical" | "compact";
+
+export interface JobState {
+  kind: JobKind;
+  /** Something holds this index. The same for every kind — they share a lock. */
+  busy: boolean;
+  /** This kind is what holds it. Per kind, unlike `busy`. */
+  running: boolean;
+  /** Which kind holds it, when that can be known rather than guessed. */
+  holder_kind: JobKind | null;
+  pid: number | null;
+  model: string | null;
+  done: number | null;
+  live: number | null;
+  share: number | null;
+  /** Chunks per second, measured from the gap between *your own* polls. */
+  rate: number | null;
+  eta_seconds: number | null;
+  book_in_flight: string | null;
+  log: string | null;
+  log_tail?: string;
+}
+
+export interface CheckModel {
+  name: string;
+  dim: number;
+  embedded: number;
+  to_copy: number;
+  to_embed: number;
+  failed: number;
+  outstanding: number;
+  coverage: number;
+  routing: {
+    built: boolean;
+    stale_books: number;
+    drifted_books: number;
+    /** Books `--route` cannot return at any rank. Non-zero: run `route`. */
+    unprofiled_books: number;
+  };
+}
+
+export interface Check {
+  deep: boolean;
+  sources: number;
+  drift: { missing: string[]; changed: string[]; intact: number; clean: boolean };
+  live_chunks: number;
+  dead_chunks: number;
+  lexical_chunks: number;
+  lexical_complete: boolean;
+  garbled: unknown[];
+  empty: unknown[];
+  models: CheckModel[];
+}
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -268,10 +322,28 @@ export const api = {
         `&offset=${offset}&span=${span}`,
     ),
 
+  jobs: (name: string) =>
+    request<Record<JobKind, JobState>>(`/libraries/${encodeURIComponent(name)}/jobs`),
+
+  job: (name: string, kind: JobKind, tail = 40) =>
+    request<JobState>(`/libraries/${encodeURIComponent(name)}/jobs/${kind}?tail=${tail}`),
+
+  startJob: (name: string, kind: JobKind, options: Record<string, unknown> = {}) =>
+    post<{ kind: string; pid: number; log: string; started_at: string }>(
+      `/libraries/${encodeURIComponent(name)}/jobs/${kind}`,
+      options,
+    ),
+
+  stopJob: (name: string, kind: JobKind, force = false) =>
+    request<{ stopped: boolean; pid: number | null; why?: string; note?: string }>(
+      `/libraries/${encodeURIComponent(name)}/jobs/${kind}?force=${force}`,
+      { method: "DELETE" },
+    ),
+
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
 
   check: (name: string, deep = false) =>
-    request<unknown>(`/libraries/${encodeURIComponent(name)}/check?deep=${deep}`),
+    request<Check>(`/libraries/${encodeURIComponent(name)}/check?deep=${deep}`),
 };
 
 /**

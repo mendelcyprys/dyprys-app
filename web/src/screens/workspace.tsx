@@ -5,8 +5,10 @@ import { cn } from "@/lib/utils";
 import { NotesDialog, NotesNudge } from "@/rail/notes";
 import type { LibraryRow } from "@/lib/api";
 import { ModelCoverage } from "@/components/coverage";
+import { useCheck } from "@/lib/queries";
 import { Books } from "./books";
 import { Ask } from "./ask";
+import { Jobs } from "./jobs";
 import { Models } from "./models";
 
 export const TABS = ["Ask", "Books", "Models", "Jobs"] as const;
@@ -23,6 +25,15 @@ export function Workspace({
   onTab: (tab: Tab) => void;
 }) {
   const [notesOpen, setNotesOpen] = React.useState(false);
+  const check = useCheck(library.name);
+
+  // The one number worth putting on a tab: books `--route` cannot reach at any
+  // rank, while a routed search still returns a full `k` at 200. Nothing else
+  // in the interface would ever mention them.
+  const unprofiled = (check.data?.models ?? []).reduce(
+    (most, model) => Math.max(most, model.routing.unprofiled_books),
+    0,
+  );
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
@@ -32,13 +43,16 @@ export function Workspace({
             key={each}
             onClick={() => onTab(each)}
             className={cn(
-              "-mb-px border-b-2 px-3 py-2.5 text-sm transition-colors",
+              "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm transition-colors",
               each === tab
                 ? "border-foreground font-medium"
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {each}
+            {each === "Jobs" && unprofiled > 0 && (
+              <Badge variant="warning">{unprofiled.toLocaleString()}</Badge>
+            )}
           </button>
         ))}
       </nav>
@@ -48,6 +62,8 @@ export function Workspace({
 
         {tab === "Ask" ? (
           <Ask key={library.name} library={library.name} />
+        ) : tab === "Jobs" ? (
+          <Jobs library={library.name} />
         ) : tab === "Models" ? (
           <Models library={library.name} />
         ) : tab === "Books" ? (

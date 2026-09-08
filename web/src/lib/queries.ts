@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Libraries } from "@/lib/api";
+import { api, type JobKind, type Libraries } from "@/lib/api";
 
 export const keys = {
   libraries: ["libraries"] as const,
@@ -107,4 +107,68 @@ export function useWarm(library: string | null) {
     mutationFn: (model?: string) => api.warm(library!, model),
     onSuccess: () => cache.invalidateQueries({ queryKey: keys.health }),
   });
+}
+
+export function useCheck(library: string | null) {
+  return useQuery({
+    queryKey: ["check", library] as const,
+    queryFn: () => api.check(library!),
+    enabled: Boolean(library),
+  });
+}
+
+/**
+ * Every job kind, polled.
+ *
+ * On an interval on purpose, and not once: `rate` is computed from the gap
+ * between *your own* polls, falling back until a second one arrives to the
+ * median this machine has managed. A UI that polls once shows the fallback
+ * guess forever and calls it a measurement.
+ *
+ * Faster while something is running, slow otherwise — and paused when the tab
+ * is hidden, since nobody is reading it and a days-long embed does not need
+ * watching from a background tab.
+ */
+export function useJobs(library: string | null) {
+  return useQuery({
+    queryKey: ["jobs", library] as const,
+    queryFn: () => api.jobs(library!),
+    enabled: Boolean(library),
+    // Derived from the data rather than passed in, so there is one observer and
+    // one interval: two hooks on the same key with different intervals poll
+    // twice and disagree about the rate each of them measures.
+    refetchInterval: (query) =>
+      Object.values(query.state.data ?? {}).some((job) => job.running) ? 2_000 : 10_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useJobLog(library: string | null, kind: JobKind | null) {
+  return useQuery({
+    queryKey: ["job-log", library, kind] as const,
+    queryFn: () => api.job(library!, kind!, 60),
+    enabled: Boolean(library) && Boolean(kind),
+    refetchInterval: 4_000,
+  });
+}
+
+export function useJobControls(library: string) {
+  const cache = useQueryClient();
+  const refresh = () => {
+    cache.invalidateQueries({ queryKey: ["jobs", library] });
+    cache.invalidateQueries({ queryKey: ["check", library] });
+    cache.invalidateQueries({ queryKey: keys.libraries });
+  };
+  return {
+    start: useMutation({
+      mutationFn: ({ kind, options }: { kind: JobKind; options?: Record<string, unknown> }) =>
+        api.startJob(library, kind, options),
+      onSuccess: refresh,
+    }),
+    stop: useMutation({
+      mutationFn: ({ kind, force }: { kind: JobKind; force?: boolean }) =>
+        api.stopJob(library, kind, force),
+      onSuccess: refresh,
+    }),
+  };
 }
