@@ -56,11 +56,11 @@ export function useRegistryWrite() {
  * box and `-c` are one matcher: what you type to find a book is what selecting
  * it will mean. Debouncing is the caller's job — this only caches.
  */
-export function useBooks(library: string | null, pattern: string) {
+export function useBooks(library: string | null, pattern: string, enabled = true) {
   return useQuery({
     queryKey: ["books", library, pattern] as const,
     queryFn: () => api.books(library!, pattern || undefined),
-    enabled: Boolean(library),
+    enabled: Boolean(library) && enabled,
     placeholderData: (previous) => previous,
   });
 }
@@ -171,4 +171,19 @@ export function useJobControls(library: string) {
       onSuccess: refresh,
     }),
   };
+}
+
+/**
+ * Cross-session and cross-*interface* memory.
+ *
+ * Searches run from a terminal appear here, and since the service layer landed
+ * so do `--json` ones — which is the point: a question worth asking twice
+ * should not have to be reconstructed from memory.
+ */
+export function useAsked(library: string | null, find?: string) {
+  return useQuery({
+    queryKey: ["asked", library, find ?? ""] as const,
+    queryFn: () => api.asked(library!, 12, find),
+    enabled: Boolean(library),
+  });
 }

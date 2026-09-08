@@ -267,6 +267,31 @@ export interface Check {
   models: CheckModel[];
 }
 
+export interface AskedHit {
+  chunk: number;
+  title: string;
+  path: string;
+  offset: number;
+  cos: number;
+  why: string | null;
+}
+
+export interface AskedRow {
+  id: number;
+  at: string;
+  question: string;
+  mode: string;
+  ms: number;
+  detail: {
+    routed: boolean;
+    books: number | null;
+    models: Record<string, string>;
+    expansion: unknown;
+    hits: AskedHit[];
+    answer: Answer | null;
+  };
+}
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -338,6 +363,13 @@ export const api = {
     request<{ stopped: boolean; pid: number | null; why?: string; note?: string }>(
       `/libraries/${encodeURIComponent(name)}/jobs/${kind}?force=${force}`,
       { method: "DELETE" },
+    ),
+
+  /** What this library has already been asked — from either frontend. */
+  asked: (name: string, limit = 12, find?: string) =>
+    request<{ questions: AskedRow[] }>(
+      `/libraries/${encodeURIComponent(name)}/asked?limit=${limit}` +
+        (find ? `&find=${encodeURIComponent(find)}` : ""),
     ),
 
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),

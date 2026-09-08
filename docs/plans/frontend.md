@@ -236,7 +236,7 @@ the surest evidence the library lacks something.
 - Never start `embed` implicitly. It can run for days. The button says how much
   is outstanding and roughly how long, from `check` and `observed_rate`.
 
-## Phase 6 — Asked, and the polish
+## Phase 6 — Asked, and the polish  ✅ built
 
 `GET /asked` is cross-session, cross-*interface* memory — searches run from the
 terminal appear here, and since the service layer landed, `--json` searches do
@@ -256,6 +256,26 @@ What is left belongs to phases still to come:
 |---|---|---|
 | cancel an in-flight search | 4 | the stream's disconnect is currently not observed; the worker runs on |
 | book table of contents | 4 | chapter offsets for a book, so the reader can jump |
+
+## What was learned building it
+
+Four things the plan could not have known, each found by running the thing
+against a real library rather than by reasoning about it:
+
+- **A scoped search really does return books you did not select.** Reproduced on
+  `sefaria`: scoped to `Bible/Amos.txt`, "the ox that gored" returns Ketubot and
+  Bava_Kamma at ranks 2 and 4 by exact phrase. The badge is not theoretical.
+- **`answer` was missing three fields**, so over HTTP a refusal that survived a
+  rephrasing was indistinguishable from one never rephrased, and a successful
+  retry produced an answer about passages that were not on the screen.
+- **One held lock reported five running jobs**, because every kind takes the
+  same lock and `state` read "running" straight off the holder.
+- **A job could start, die, and leave no trace** — `dyp route` refuses without
+  `--model` on a multi-model index, and a detached subprocess refuses by
+  exiting a second after it spawns.
+
+The pattern in all four: the failure was silent, and the interface was where it
+became audible. That is what this client is for.
 
 ## What is deliberately not in this plan
 

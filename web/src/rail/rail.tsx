@@ -9,6 +9,7 @@ import { useSelection } from "@/lib/selection";
 import { useSearchSettings } from "@/lib/settings";
 import { LibraryPicker } from "./library-picker";
 import { NotesDialog } from "./notes";
+import { Asked } from "./asked";
 import { ModelPicker } from "./model-picker";
 import { Scope } from "./scope";
 import { SettingsSheet } from "./settings-sheet";
@@ -21,9 +22,11 @@ import { SettingsSheet } from "./settings-sheet";
 export function Rail({
   libraries,
   onEditScope,
+  onAsk,
 }: {
   libraries: Libraries;
   onEditScope: () => void;
+  onAsk: () => void;
 }) {
   const { library, select } = useSelection();
   const [notesOpen, setNotesOpen] = React.useState(false);
@@ -92,6 +95,8 @@ export function Rail({
           </p>
         </div>
       )}
+
+      {current?.exists && <Asked onRun={onAsk} />}
 
       <div className="mt-auto space-y-1">
         <Tooltip label={libraries.registry_path}>

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Palette } from "@/components/palette";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DyprysError } from "@/lib/api";
 import { useLibraries } from "@/lib/queries";
@@ -68,7 +69,12 @@ export function App() {
     <Shell>
       <SettingsProvider library={library}>
         <div className="flex h-full">
-          <Rail libraries={libraries.data} onEditScope={() => setTab("Books")} />
+          <Palette libraries={libraries.data} onTab={setTab} />
+          <Rail
+            libraries={libraries.data}
+            onEditScope={() => setTab("Books")}
+            onAsk={() => setTab("Ask")}
+          />
           {current?.exists ? (
             <Workspace library={current} tab={tab} onTab={setTab} />
           ) : (

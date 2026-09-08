@@ -1,3 +1,4 @@
+import * as React from "react";
 import { AlertTriangle, FileWarning, Quote, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -20,10 +21,13 @@ import type { Reading } from "./reader";
 export function Results({
   answered,
   scope,
+  cursor,
   onRead,
 }: {
   answered: Answered;
   scope: string[];
+  /** Which row j/k is on. Presentation only — it never reorders anything. */
+  cursor: number;
   onRead: (reading: Reading) => void;
 }) {
   return (
@@ -31,8 +35,14 @@ export function Results({
       <Warnings answered={answered} />
       {answered.answer && <Drafted answer={answered.answer} onRead={onRead} />}
 
-      {answered.results.map((result) => (
-        <Passage key={result.chunk_id} result={result} scope={scope} onRead={onRead} />
+      {answered.results.map((result, index) => (
+        <Passage
+          key={result.chunk_id}
+          result={result}
+          scope={scope}
+          focused={index === cursor}
+          onRead={onRead}
+        />
       ))}
 
       <p className="pt-2 text-[11px] text-muted-foreground">
@@ -73,12 +83,23 @@ function Warnings({ answered }: { answered: Answered }) {
 function Passage({
   result,
   scope,
+  focused,
   onRead,
 }: {
   result: Result;
   scope: string[];
+  focused: boolean;
   onRead: (reading: Reading) => void;
 }) {
+  const card = React.useRef<HTMLElement>(null);
+  // Top, not "nearest": a passage here is routinely taller than the pane -- a
+  // 6,500px chunk out of a pitchbook is ordinary -- and "nearest" then leaves
+  // the chosen result wherever it happened to be. Instant, because a smooth
+  // scroll across ten thousand pixels is a distraction, not a transition.
+  React.useEffect(() => {
+    if (focused) card.current?.scrollIntoView({ block: "start", behavior: "auto" });
+  }, [focused]);
+
   const proved = result.text !== null;
   // Deliberate and measured: the exact-phrase leg searches the whole library
   // even under a scope, because confining it took lexical safety from 20/20 to
@@ -89,9 +110,11 @@ function Passage({
 
   return (
     <article
+      ref={card}
       className={cn(
         "rounded-lg border p-4 transition-colors",
         proved ? "hover:border-ring" : "border-dashed opacity-80",
+        focused && "border-ring ring-1 ring-ring",
       )}
     >
       <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">

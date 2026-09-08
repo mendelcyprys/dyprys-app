@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { askStream, DyprysError, type Answered, type SearchBody, type Stage } from "@/lib/api";
+import { usePending } from "@/lib/pending";
 import { useSelection } from "@/lib/selection";
 import { useSearchSettings } from "@/lib/settings";
 import { ModelChoices } from "@/rail/model-picker";
@@ -30,14 +31,18 @@ export function Ask({ library }: { library: string }) {
   const [running, setRunning] = React.useState(false);
   const [reading, setReading] = React.useState<Reading | null>(null);
   const [showStages, setShowStages] = React.useState(false);
+  const [cursor, setCursor] = React.useState(0);
   const abort = React.useRef<AbortController | null>(null);
 
   const { scope } = useSelection();
   const { settings, update } = useSearchSettings();
+  const { pending, taken } = usePending();
 
-  async function run(event: React.FormEvent) {
-    event.preventDefault();
-    if (!question.trim() || running) return;
+  async function run(event?: React.FormEvent, asked?: string) {
+    event?.preventDefault();
+    const wanted = (asked ?? question).trim();
+    if (!wanted || running) return;
+    setQuestion(wanted);
 
     abort.current?.abort();
     const controller = new AbortController();
@@ -47,9 +52,10 @@ export function Ask({ library }: { library: string }) {
     setStages([]);
     setFailure(null);
     setShowStages(false);
+    setCursor(0);
 
     const body: SearchBody = {
-      question,
+      question: wanted,
       k: 5,
       model: settings.model,
       collection: scope.length ? scope : null,
@@ -80,6 +86,47 @@ export function Ask({ library }: { library: string }) {
       if (abort.current === controller) setRunning(false);
     }
   }
+
+  // A question handed over from the history list or the palette. Taken once and
+  // cleared, because it is an event and not a setting: left in place it would
+  // re-run on every render that touched it.
+  React.useEffect(() => {
+    if (!pending) return;
+    taken();
+    void run(undefined, pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
+  // j/k through the results, enter to open the reader -- but never while
+  // someone is typing a question, which is the whole of the rest of the time.
+  React.useEffect(() => {
+    const rows = answered?.results ?? [];
+    if (rows.length === 0) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "j" || event.key === "k") {
+        event.preventDefault();
+        setCursor((at) =>
+          Math.max(0, Math.min(rows.length - 1, event.key === "j" ? at + 1 : at - 1)),
+        );
+      }
+      if (event.key === "Enter") {
+        const chosen = rows[cursor];
+        if (!chosen) return;
+        event.preventDefault();
+        setReading({
+          path: chosen.path,
+          offset: chosen.offset,
+          book: chosen.book,
+          text: chosen.text,
+        });
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [answered, cursor]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -165,7 +212,7 @@ export function Ask({ library }: { library: string }) {
               </details>
             )}
 
-            <Results answered={answered} scope={scope} onRead={setReading} />
+            <Results answered={answered} scope={scope} cursor={cursor} onRead={setReading} />
           </div>
         )}
 
@@ -181,12 +228,24 @@ export function Ask({ library }: { library: string }) {
               The answer is the first result about six times in ten, and somewhere in the top five
               about eight. Read several.
             </p>
+            <p className="flex flex-wrap items-center gap-1 pt-2 text-xs">
+              <Key>j</Key> <Key>k</Key> move through results, <Key>enter</Key> opens one in its
+              book, <Key>Cmd K</Key> for everything else.
+            </p>
           </div>
         )}
       </div>
 
       <Reader library={library} reading={reading} onClose={() => setReading(null)} />
     </div>
+  );
+}
+
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border px-1 py-0.5 font-mono text-[10px] text-foreground">
+      {children}
+    </kbd>
   );
 }
 

@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app";
+import { PendingProvider } from "./lib/pending";
 import { SelectionProvider } from "./lib/selection";
 import "./index.css";
 
@@ -21,7 +22,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queries}>
       <SelectionProvider>
-        <App />
+        <PendingProvider>
+          <App />
+        </PendingProvider>
       </SelectionProvider>
     </QueryClientProvider>
   </React.StrictMode>,

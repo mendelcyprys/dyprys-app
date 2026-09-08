@@ -48,6 +48,12 @@ that is invisible from a search's output.
 chosen, because a detached subprocess refuses by exiting a second after it
 starts, which over HTTP looks like a job that never ran.
 
+**Asked, and the keyboard** — the rail lists what this library has already been
+asked, from either frontend: a question typed in a terminal shows up there, and
+so does one an agent asked through `--json`. Clicking runs it again. `Cmd-K`
+opens a palette over libraries, books, tabs and past questions; `j`/`k` move
+through results and `enter` opens one in its book.
+
 ## The rules this client is built to keep
 
 Three of them come straight from `docs/serving.md`, and every one is easy to
