@@ -851,6 +851,11 @@ def search(session: Session, question: str, options: SearchOptions | None = None
     if not question:
         raise errors.EmptyQuery("empty query — give something to search for")
 
+    # Before the embedder, which is the first thing a search loads and is 300 MB
+    # to 1 GB on a cold session. This is also the checkpoint that matters for a
+    # request that was *queued*: it waited behind another search, and whoever
+    # asked may well have given up during the wait.
+    say.check()
     embedder, model_id, store = session.model(options.model)
 
     from dyprys.search import resolve, scanned_fraction, scope

@@ -21,6 +21,8 @@ export interface Settings {
   model: string | null;
   reranker: string | null;
   expander: string | null;
+  /** How many candidates the cross-encoder rescores. The price of reranking. */
+  depth: number;
   /** Draft prose from the passages. Off by default: it costs seconds. */
   summarise: boolean;
   /** Which model drafts it. Null means whatever the library remembers. */
@@ -32,6 +34,9 @@ const EMPTY: Settings = {
   model: null,
   reranker: null,
   expander: null,
+  // The same default a bare `--rerank` has. It was 20 here, which is twice the
+  // cost of the documented default and nothing said so.
+  depth: 10,
   summarise: false,
   summariser: null,
   effort: "fast",

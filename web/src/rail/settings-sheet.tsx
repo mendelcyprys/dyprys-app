@@ -103,6 +103,35 @@ export function SettingsSheet({ library }: { library: string }) {
             <p className="text-xs text-muted-foreground">
               {EFFORT.find((option) => option.value === settings.effort)?.detail}
             </p>
+
+            {settings.effort === "rerank" && (
+              <div className="space-y-1.5 rounded-md border p-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs font-medium">Depth</span>
+                  <span className="tabular-nums text-xs text-muted-foreground">
+                    {settings.depth} candidates
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={3}
+                  max={40}
+                  step={1}
+                  value={settings.depth}
+                  onChange={(event) => update({ depth: Number(event.target.value) })}
+                  className="w-full accent-[hsl(var(--primary))]"
+                />
+                {/* The one number that sets what reranking costs: it is a model
+                    pass per candidate, so the time is linear in this. Measured
+                    against a 0.6B cross-encoder, retrieval alone being 0.2s. */}
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  One model pass each, so the wait is roughly linear in this — about 7.7s at 5 and
+                  25.7s at 20 on a 0.6B cross-encoder. Reranking cannot find what the search missed;
+                  a deeper shortlist is the only thing that can, and it is also the only thing that
+                  costs.
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="space-y-3">

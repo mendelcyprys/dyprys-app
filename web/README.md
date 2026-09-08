@@ -37,7 +37,15 @@ that have gone missing said before the question rather than as a 503 during it,
 and a settings sheet holding the reranker per library.
 
 **Ask and the reader** — the streamed search, the drafted answer with its quotes
-checked, and `GET /source` as a window around a passage.
+checked, and `GET /source` as a window around a passage. Stopping a search
+really stops it: the server is told when the stream closes, and the search gives
+up at its next checkpoint rather than holding the library's one worker thread
+while the next question queues behind a closed tab.
+
+Reranking's depth is a slider, because it is the whole cost — one cross-encoder
+pass per candidate. On `neuro` with a 0.6B reranker: retrieval alone is 0.2s,
+depth 5 is 4.3s, depth 20 is 25.7s, and the top passage was the same at 5 as at
+20.
 
 **Jobs** — a card per kind with the log tail, polled on an interval so `rate` is
 measured rather than guessed, a stop button that is safe because embedding is

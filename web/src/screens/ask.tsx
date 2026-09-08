@@ -11,9 +11,6 @@ import { ModelChoices } from "@/rail/model-picker";
 import { Reader, type Reading } from "./reader";
 import { Results } from "./results";
 
-/** What `--rerank N` and `--route N` mean when the UI asks for them. */
-const RERANK_DEPTH = 20;
-
 /**
  * The search, streamed.
  *
@@ -27,6 +24,11 @@ export function Ask({ library }: { library: string }) {
   const [question, setQuestion] = React.useState("");
   const [stages, setStages] = React.useState<Stage[]>([]);
   const [answered, setAnswered] = React.useState<Answered | null>(null);
+  // The scope the *answer* was found under, not the one the rail holds now.
+  // Editing the scope after a search must not silently relabel which of its
+  // results escaped it -- the same mistake as reading provenance off a
+  // pipeline that has since been run again.
+  const [asked, setAsked] = React.useState<string[]>([]);
   const [failure, setFailure] = React.useState<DyprysError | null>(null);
   const [running, setRunning] = React.useState(false);
   const [reading, setReading] = React.useState<Reading | null>(null);
@@ -61,7 +63,11 @@ export function Ask({ library }: { library: string }) {
       collection: scope.length ? scope : null,
       // Never both. Measured, they are substitutes: together they recover the
       // same answers as the better one alone, at the sum of the costs.
-      rerank: settings.effort === "rerank" ? RERANK_DEPTH : 0,
+      // `rerank` is the depth: how many candidates the cross-encoder rescores,
+      // which is the whole cost. One model pass each -- 7.7s for five and
+      // 25.7s for twenty against a 0.6B reranker, where retrieval alone is
+      // 0.2s -- so this is the number worth being able to change.
+      rerank: settings.effort === "rerank" ? settings.depth : 0,
       reranker: settings.effort === "rerank" ? settings.reranker : null,
       expand: settings.effort === "expand" ? (settings.expander ?? true) : null,
       // `bool | str` on purpose: true means "whatever this library remembers",
@@ -72,6 +78,7 @@ export function Ask({ library }: { library: string }) {
     };
 
     try {
+      setAsked(scope);
       setAnswered(
         await askStream(
           library,
@@ -165,7 +172,9 @@ export function Ask({ library }: { library: string }) {
       </form>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        <Badge variant="outline">{settings.effort}</Badge>
+        <Badge variant="outline">
+          {settings.effort === "rerank" ? `rerank ${settings.depth}` : settings.effort}
+        </Badge>
         {scope.length > 0 && <Badge variant="outline">{scope.length} books</Badge>}
         {settings.summarise && (
           <Badge variant="outline">{settings.summariser ?? "summarised"}</Badge>
@@ -218,7 +227,7 @@ export function Ask({ library }: { library: string }) {
               </details>
             )}
 
-            <Results answered={answered} scope={scope} cursor={cursor} onRead={setReading} />
+            <Results answered={answered} scope={asked} cursor={cursor} onRead={setReading} />
           </div>
         )}
 
