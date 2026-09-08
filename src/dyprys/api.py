@@ -541,9 +541,13 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         The span is capped rather than refused, because a UI asking for too much
         should get what it may have.
         """
-        text, at = await indexes.run(
+        text, at, end, size = await indexes.run(
             name, lambda s: service.source_window(s, path, offset, span))
-        return {"path": path, "offset": at, "text": text}
+        # `end` and `bytes` are what let a caller read continuously rather than
+        # in disconnected excerpts: the next stretch starts exactly at `end`,
+        # and `end == bytes` is the only honest way to say "that is the whole
+        # file" -- a short response could equally be a snap to a sentence.
+        return {"path": path, "offset": at, "text": text, "end": end, "bytes": size}
 
     # --- the long mutations -----------------------------------------------
 

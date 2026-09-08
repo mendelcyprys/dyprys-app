@@ -209,7 +209,14 @@ def test_a_real_source_is_served_with_its_offset(client, index):
                           params={"path": real, "offset": 0, "span": 400})
 
     assert response.status_code == 200
-    assert response.json()["text"]
+    body = response.json()
+    assert body["text"]
+    # `end` and `bytes` are what let the reader be a reader rather than a series
+    # of excerpts: the next stretch begins exactly at `end`, and `end == bytes`
+    # is the only honest way to say "that was the whole file" -- a short
+    # response could equally be a snap back to a sentence boundary.
+    assert body["end"] == body["offset"] + len(body["text"].encode("utf-8"))
+    assert body["bytes"] >= body["end"]
 
 
 def test_an_enormous_span_is_capped_rather_than_refused(client, index):

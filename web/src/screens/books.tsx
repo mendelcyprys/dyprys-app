@@ -100,7 +100,7 @@ export function Books({ library }: { library: string }) {
           <Input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Title or path — a shelf (Talmud/), a work (Kandel), a glob (*Imaging*)"
+            placeholder="Title or path — a shelf (papers/), part of a title, a glob (*Atlas*)"
             className="pl-8"
             spellCheck={false}
           />

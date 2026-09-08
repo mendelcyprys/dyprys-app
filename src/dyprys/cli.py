@@ -158,7 +158,7 @@ def build_parser() -> argparse.ArgumentParser:
              "more than one (see `dyp books --chunkings`)")
     embed.add_argument(
         "-c", "--collection", metavar="PATTERN",
-        help="embed only books whose title or path matches, e.g. -c neuroscience/",
+        help="embed only books whose title or path matches, e.g. -c papers/",
     )
 
     ask = sub.add_parser("ask", help="search for the passage that answers a question")
@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument(
         "-c", "--collection", metavar="PATTERN", action="append",
         help="search only books whose title or path matches — a shelf "
-             "(neuroscience/), one work (Kandel), or a set (\"*Imaging*\"). "
+             "(papers/), one work (part of its title), or a set (\"*Atlas*\"). "
              "Repeatable: several -c are a union, which is how a list of books "
              "picked by hand is said. A pattern matching nothing is an error, "
              "not a silent contribution of no books.",

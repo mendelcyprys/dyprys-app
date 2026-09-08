@@ -958,7 +958,13 @@ def search(session: Session, question: str, options: SearchOptions | None = None
 
 
 def source_window(session: Session, path, offset: int, span: int = SOURCE_SPAN):
-    """Bytes around an offset in a book this index holds. `(text, offset)`.
+    """Bytes around an offset in a book this index holds.
+
+    `(text, start, end, size)` -- where the text begins and ends in the file,
+    and how long the file is. The last three are what makes a *reader* possible
+    rather than a series of excerpts: a caller that knows where its window ends
+    can ask for the next stretch exactly, and one that knows the file's length
+    knows when there is no next stretch.
 
     The path is checked against the `sources` table and nothing else. A prefix
     check is **not** equivalent and must not be substituted: symlinks, `..`, and
@@ -980,7 +986,14 @@ def source_window(session: Session, path, offset: int, span: int = SOURCE_SPAN):
     if window is None:
         raise errors.SourceUnavailable(
             f"{wanted} is in this index and could not be read; run `dyp check`")
-    return window
+    text, start = window
+    try:
+        size = Path(row["path"]).stat().st_size
+    except OSError:
+        # It was readable a line ago; a race here is not worth failing over, and
+        # None says "unknown" rather than claiming a length.
+        size = None
+    return text, start, start + len(text.encode("utf-8")), size
 
 
 # --------------------------------------------------------------------------

@@ -479,3 +479,26 @@ clear the other; `null` or `""` removes one. `GET /books` returns both, and
 `note` rides back on every search result as `book_note`. The library's
 `NOTES.md` answers "what is this corpus"; this answers "what is this book", and
 the passage on the screen is where that question actually arises.
+
+
+## Reading around a result
+
+`GET /source?path=&offset=&span=` returns `{path, offset, text, end, bytes}`.
+`offset` is where the returned text actually begins — snapped forward to a
+sentence start, so it is not the byte that was asked for — and `end` is where it
+stops.
+
+**`end` is what makes continuous reading possible.** `read_window` trims both
+edges back to sentence boundaries, so a caller that asks again at
+`offset + span` skips exactly what the trim removed: a sentence lost at every
+join, silently, in a pane whose entire job is to show text faithfully.
+Continuing from `end` cannot do that — the only bytes between one window's `end`
+and the next window's `offset` are whitespace, which
+`test_reading_on_from_where_a_window_ended_loses_nothing` pins.
+
+`bytes` is the file's length, or null if it could not be measured. `end == bytes`
+is the only reliable way to know a read reached the end of the file: a response
+shorter than `span` could equally be a snap back to a sentence.
+
+`span` is capped at `MAX_SPAN` (200 KB) rather than refused, so a reader grows
+its range a stretch at a time rather than asking for a book.

@@ -78,9 +78,9 @@ def scope(conn: sqlite3.Connection,
           patterns: str | Iterable[str]) -> tuple[set[int], list[str]]:
     """Books matching **any** pattern, and the patterns that matched none.
 
-    One pattern covers what a person types: a shelf (`-c neuroscience/`, the
-    directory books were added from), a single work (`-c Kandel`), or a related
-    set (`-c "*Imaging*"`). Several cover what a person *selects* — a checkbox
+    One pattern covers what a person types: a shelf (`-c papers/`, the directory
+    books were added from), a single work (part of its title), or a related set
+    (`-c "*Atlas*"`). Several cover what a person *selects* — a checkbox
     list of books is not expressible as one glob without synthesising one that
     is eventually wrong, so the scope is a union instead.
 

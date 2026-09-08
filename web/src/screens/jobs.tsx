@@ -33,6 +33,7 @@ import {
 } from "@/lib/queries";
 import { useSearchSettings } from "@/lib/settings";
 import { cn, count } from "@/lib/utils";
+import { Health } from "./health";
 import { AddOptions, EmbedOptions } from "./job-options";
 
 /**
@@ -147,6 +148,8 @@ export function Jobs({ library }: { library: string }) {
 
   return (
     <div className="space-y-4 overflow-y-auto">
+      <Health check={check.data} onRun={(kind) => start(kind)} canRun={!held && !mustChoose} />
+
       {unprofiled > 0 && (
         // The single most valuable nudge here, because the failure it prevents
         // is silent: a book embedded since the last `dyp route` has no profile,

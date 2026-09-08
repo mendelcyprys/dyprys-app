@@ -94,6 +94,22 @@ A book's note rides back on every result from it, under the passage — the
 library's `NOTES.md` one book down, in the place where "which edition is this?"
 is actually asked.
 
+**The reader** — one continuous document, not a series of windows. The first
+version paged: Earlier and Later re-requested a window at a new offset and
+replaced what was on screen, which is a defensible way to *look at* a citation
+and a bad way to *read* — every move threw away where you were. Now the loaded
+byte range grows at whichever edge you scroll to, each stretch continuing from
+the previous one's `end` (asking again at `offset + span` would skip whatever
+the sentence-snap trimmed), and a prepend corrects the scroll position by the
+height it added, in a layout effect, before the browser paints.
+
+**Jobs** also carries what a search will never tell you: books whose extraction
+failed and so can never match a query, files gone or edited since indexing, an
+incomplete BM25 index, chunks that failed to embed. `dyp check` has always
+computed all of it; the browser read two fields and typed the rest `unknown[]`.
+Every entry shares one shape — the search still returns `k` results and still
+exits 0 — which is exactly why they need saying somewhere.
+
 **Asked, and the keyboard** — the rail lists what this library has already been
 asked, from either frontend: a question typed in a terminal shows up there, and
 so does one an agent asked through `--json`. Clicking runs it again. `Cmd-K`

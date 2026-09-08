@@ -527,7 +527,7 @@ export function EmbedOptions({
         <Field
           label="Only these books"
           className="col-span-2"
-          hint="one pattern — a shelf (neuroscience/), one work (Kandel), or a glob (*Imaging*). Resolved before the weights are opened, so a pattern matching nothing costs milliseconds."
+          hint="one pattern — a shelf (papers/), part of one title, or a glob (*Atlas*). Resolved before the weights are opened, so a pattern matching nothing costs milliseconds."
         >
           <Input
             value={collection}

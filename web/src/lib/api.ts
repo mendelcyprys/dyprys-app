@@ -268,8 +268,17 @@ export interface SearchBody {
 
 export interface SourceWindow {
   path: string;
+  /** Where this text begins in the file. Snapped to a sentence, so not `offset`. */
   offset: number;
   text: string;
+  /**
+   * Where it stops. The next stretch begins here — exactly, which is the point:
+   * asking again at `offset + span` skips whatever the sentence-snap trimmed,
+   * and a reader built on that drops a sentence at every join.
+   */
+  end: number;
+  /** The file's length, or null if it could not be measured. `end === bytes` is the end. */
+  bytes: number | null;
 }
 
 export type JobKind = "embed" | "add" | "route" | "lexical" | "compact";
@@ -313,6 +322,14 @@ export interface CheckModel {
   };
 }
 
+/** A book the extractor mangled, or one that holds no text at all. */
+export interface BookFault {
+  title: string;
+  chunks: number;
+  /** 90th-percentile token length. High means word boundaries were lost. */
+  p90_token?: number;
+}
+
 export interface Check {
   deep: boolean;
   sources: number;
@@ -320,9 +337,12 @@ export interface Check {
   live_chunks: number;
   dead_chunks: number;
   lexical_chunks: number;
+  /** False: the literal half of every search is incomplete, and says nothing. */
   lexical_complete: boolean;
-  garbled: unknown[];
-  empty: unknown[];
+  /** Books whose text came out as runs of glued-together characters. */
+  garbled: BookFault[];
+  /** Books with nothing in them. */
+  empty: BookFault[];
   models: CheckModel[];
 }
 

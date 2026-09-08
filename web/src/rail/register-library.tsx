@@ -78,7 +78,7 @@ export function RegisterLibrary({
               autoFocus
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="neuro"
+              placeholder="a short name for it"
               spellCheck={false}
             />
             <span className="block text-[11px] text-muted-foreground">
@@ -93,7 +93,7 @@ export function RegisterLibrary({
             <Input
               value={path}
               onChange={(event) => setPath(event.target.value)}
-              placeholder="/Users/you/dyprys/neuro"
+              placeholder="/Users/you/dyprys/mine"
               spellCheck={false}
               className="font-mono text-xs"
             />

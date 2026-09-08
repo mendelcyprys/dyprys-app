@@ -255,17 +255,21 @@ def test_a_source_window_reads_a_real_book(session):
     """The path a result already handed back must work, or the pane is useless."""
     row = session.conn.execute("SELECT path FROM sources LIMIT 1").fetchone()
 
-    text, offset = service.source_window(session, row["path"], 0, 400)
+    text, offset, end, size = service.source_window(session, row["path"], 0, 400)
 
     assert text and isinstance(text, str)
     assert offset >= 0
+    # `end` is where the next stretch begins, and it has to be exact: a reader
+    # that continues from a guess loses a sentence at every join.
+    assert end == offset + len(text.encode("utf-8"))
+    assert size is not None and end <= size
 
 
 def test_a_source_window_span_is_capped(session):
     """An uncapped span turns one request into "send me this whole book"."""
     row = session.conn.execute("SELECT path FROM sources LIMIT 1").fetchone()
 
-    text, _ = service.source_window(session, row["path"], 0, 10 ** 9)
+    text, _, _, _ = service.source_window(session, row["path"], 0, 10 ** 9)
 
     assert len(text.encode()) <= service.MAX_SPAN
 
@@ -438,3 +442,33 @@ def test_the_check_happens_before_the_expensive_stages_not_after(session):
     service.search(session, "neurons", service.SearchOptions(), progress=say)
 
     assert say.asked >= 2, f"only {say.asked} checkpoint(s); one is barely cooperative"
+
+
+def test_reading_on_from_where_a_window_ended_loses_nothing(session):
+    """Windows joined at `end` cover the file with no gap.
+
+    This is the property a continuous reader rests on. `read_window` snaps both
+    of its edges to sentence boundaries, so the naive join -- ask again at
+    `offset + span` -- skips exactly what the snap trimmed, and the reader drops
+    a sentence at every boundary without saying so. Continuing from the reported
+    `end` cannot: it is where the returned bytes actually stopped.
+    """
+    row = session.conn.execute("SELECT path FROM sources LIMIT 1").fetchone()
+
+    first, start, end, size = service.source_window(session, row["path"], 0, 300)
+    second, next_start, next_end, _ = service.source_window(session, row["path"], end, 300)
+
+    assert end == start + len(first.encode("utf-8"))
+    assert next_end == next_start + len(second.encode("utf-8"))
+    assert next_end <= size
+
+    # Contiguous up to whitespace, and that is the strongest true claim.
+    # `read_window` strips its own edges, so the next window can begin a byte or
+    # two past where this one stopped -- but only ever across whitespace. What
+    # matters is that no *readable* byte falls between two windows, because that
+    # is a sentence the reader would never show and never mention.
+    assert next_start >= end
+    with open(row["path"], "rb") as handle:
+        handle.seek(end)
+        skipped = handle.read(next_start - end)
+    assert skipped.strip() == b"", f"skipped readable bytes: {skipped!r}"

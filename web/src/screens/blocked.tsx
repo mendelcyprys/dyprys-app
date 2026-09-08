@@ -72,8 +72,8 @@ export function NothingRegistered() {
         <RegisterLibrary />
       </div>
       <pre className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed">
-        dyp library add neuro ~/dyprys/neuro{"\n"}
-        dyp -L neuro add ~/books
+        dyp library add mine ~/dyprys/mine{"\n"}
+        dyp -L mine add ~/books
       </pre>
       <p className="text-xs text-muted-foreground">
         Embedding is the slow step and is never started for you — it can run for days on a large
