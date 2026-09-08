@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { askStream, DyprysError, type Answered, type SearchBody, type Stage } from "@/lib/api";
 import { usePending } from "@/lib/pending";
 import { useSelection } from "@/lib/selection";
+import { useDefaults } from "@/lib/queries";
 import { useSearchSettings } from "@/lib/settings";
 import { ModelChoices } from "@/rail/model-picker";
 import { Reader, type Reading } from "./reader";
@@ -33,12 +34,18 @@ export function Ask({ library }: { library: string }) {
   const [running, setRunning] = React.useState(false);
   const [reading, setReading] = React.useState<Reading | null>(null);
   const [showStages, setShowStages] = React.useState(false);
-  const [cursor, setCursor] = React.useState(0);
+  // Null until j/k is pressed. Starting at 0 meant the first result scrolled
+  // itself to the top of the pane on every search -- which pushed the drafted
+  // answer, the thing above it, off the screen entirely.
+  const [cursor, setCursor] = React.useState<number | null>(null);
   const abort = React.useRef<AbortController | null>(null);
 
   const { scope } = useSelection();
   const { settings, update } = useSearchSettings();
   const { pending, taken } = usePending();
+  // What the library remembers, so this does not warn about a missing reranker
+  // the index can supply on its own.
+  const remembered = useDefaults(library).data?.defaults;
 
   async function run(event?: React.FormEvent, asked?: string) {
     event?.preventDefault();
@@ -54,7 +61,7 @@ export function Ask({ library }: { library: string }) {
     setStages([]);
     setFailure(null);
     setShowStages(false);
-    setCursor(0);
+    setCursor(null);
 
     const body: SearchBody = {
       question: wanted,
@@ -119,12 +126,13 @@ export function Ask({ library }: { library: string }) {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === "j" || event.key === "k") {
         event.preventDefault();
-        setCursor((at) =>
-          Math.max(0, Math.min(rows.length - 1, event.key === "j" ? at + 1 : at - 1)),
-        );
+        setCursor((at) => {
+          if (at === null) return 0;
+          return Math.max(0, Math.min(rows.length - 1, event.key === "j" ? at + 1 : at - 1));
+        });
       }
       if (event.key === "Enter") {
-        const chosen = rows[cursor];
+        const chosen = cursor === null ? undefined : rows[cursor];
         if (!chosen) return;
         event.preventDefault();
         setReading({
@@ -179,7 +187,7 @@ export function Ask({ library }: { library: string }) {
         {settings.summarise && (
           <Badge variant="outline">{settings.summariser ?? "summarised"}</Badge>
         )}
-        {settings.effort === "rerank" && !settings.reranker && (
+        {settings.effort === "rerank" && !settings.reranker && !remembered?.reranker && (
           // Bare rerank is a 503, not a downgrade — better said before the
           // search than after it.
           <span className="text-amber-500">

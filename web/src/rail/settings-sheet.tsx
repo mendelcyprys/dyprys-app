@@ -1,7 +1,8 @@
 import * as React from "react";
-import { FileQuestion, Settings2, Zap } from "lucide-react";
+import { FileQuestion, Settings2, Star, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -9,8 +10,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { useAvailableModels } from "@/lib/queries";
+import { ModelChoice } from "@/components/model-choice";
+import { useAvailableModels, useDefaults, useOllama, useRemember } from "@/lib/queries";
 import { useSearchSettings, type Effort } from "@/lib/settings";
 import { bytes, cn } from "@/lib/utils";
 
@@ -48,6 +49,9 @@ export function SettingsSheet({ library }: { library: string }) {
   const [open, setOpen] = React.useState(false);
   const { settings, update } = useSearchSettings();
   const weights = useAvailableModels(library, open);
+  const ollama = useOllama(open);
+  const defaults = useDefaults(library);
+  const remember = useRemember(library);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -146,7 +150,10 @@ export function SettingsSheet({ library }: { library: string }) {
 
             <Weights
               chosen={settings.reranker}
+              remembered={defaults.data?.defaults.reranker ?? null}
               onChoose={(path) => update({ reranker: path })}
+              onRemember={(path) => remember.mutate({ role: "reranker", model: path })}
+              busy={remember.isPending}
               files={weights.data?.models}
               searched={weights.data?.searched}
               loading={weights.isLoading}
@@ -183,16 +190,28 @@ export function SettingsSheet({ library }: { library: string }) {
             </div>
 
             {settings.summarise && (
-              <label className="block space-y-1">
-                <span className="text-xs text-muted-foreground">which model — an ollama name</span>
-                <Input
-                  value={settings.summariser ?? ""}
-                  onChange={(event) => update({ summariser: event.target.value || null })}
-                  placeholder="whatever this library remembers"
-                  spellCheck={false}
-                  className="font-mono text-xs"
-                />
-              </label>
+              <ModelChoice
+                installed={ollama.data?.models ?? []}
+                chosen={settings.summariser}
+                remembered={defaults.data?.defaults.summariser ?? null}
+                onChoose={(model) => update({ summariser: model })}
+                onRemember={(model) => remember.mutate({ role: "summariser", model })}
+                busy={remember.isPending}
+                empty={
+                  <>
+                    Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
+                    <code className="font-mono">ollama serve</code>, or name a model anyway.
+                  </>
+                }
+              />
+            )}
+            {settings.summarise && !settings.summariser && (
+              <p className="text-[11px] text-muted-foreground">
+                Nothing picked, so the library’s own default is used — starred here, and{" "}
+                {defaults.data?.defaults.summariser
+                  ? `currently ${defaults.data.defaults.summariser}.`
+                  : "there is none, so a search will refuse rather than guess."}
+              </p>
             )}
           </section>
 
@@ -200,18 +219,31 @@ export function SettingsSheet({ library }: { library: string }) {
             <div>
               <h3 className="text-sm font-medium">Expander</h3>
               <p className="mt-1 text-xs text-muted-foreground">
-                An ollama model name, used only when Effort is set to Expand. Left empty, the
-                library’s own remembered choice is used — usually the right answer, and why this is
-                text rather than a picker.
+                Used only when Effort is set to Expand. Pick nothing and the library’s own default
+                is used.
               </p>
             </div>
-            <Input
-              value={settings.expander ?? ""}
-              onChange={(event) => update({ expander: event.target.value || null })}
-              placeholder="whatever this library remembers"
-              spellCheck={false}
-              className="font-mono text-xs"
+            <ModelChoice
+              installed={ollama.data?.models ?? []}
+              chosen={settings.expander}
+              remembered={defaults.data?.defaults.expander ?? null}
+              onChoose={(model) => update({ expander: model })}
+              onRemember={(model) => remember.mutate({ role: "expander", model })}
+              busy={remember.isPending}
+              empty={
+                <>
+                  Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
+                  <code className="font-mono">ollama serve</code>, or name a model anyway.
+                </>
+              }
             />
+            {remember.error && (
+              <p className="text-xs text-destructive">{(remember.error as Error).message}</p>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              The star writes into the index, so a default set here is the one a terminal reads too.
+              Picking is just this browser, for the next search.
+            </p>
           </section>
         </div>
       </DialogContent>
@@ -221,13 +253,19 @@ export function SettingsSheet({ library }: { library: string }) {
 
 function Weights({
   chosen,
+  remembered,
   onChoose,
+  onRemember,
+  busy,
   files,
   searched,
   loading,
 }: {
   chosen: string | null;
+  remembered: string | null;
   onChoose: (path: string | null) => void;
+  onRemember: (path: string | null) => void;
+  busy: boolean;
   files?: { path: string; name: string; bytes: number }[];
   searched?: string[];
   loading: boolean;
@@ -254,22 +292,53 @@ function Weights({
   return (
     <div className="space-y-1">
       {files.map((file) => (
-        <button
+        <div
           key={file.path}
-          onClick={() => onChoose(file.path === chosen ? null : file.path)}
           className={cn(
-            "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
+            "flex items-center gap-2 rounded-md border px-2.5 py-2 transition-colors",
             file.path === chosen ? "border-primary bg-accent" : "hover:bg-accent/50",
           )}
         >
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-mono text-[11px]">{file.name}</span>
-            <span className="block truncate text-[10px] text-muted-foreground">{file.path}</span>
-          </span>
-          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-            {bytes(file.bytes)}
-          </span>
-        </button>
+          <button
+            onClick={() => onChoose(file.path === chosen ? null : file.path)}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-mono text-[11px]">{file.name}</span>
+              <span className="block truncate text-[10px] text-muted-foreground">{file.path}</span>
+            </span>
+            {file.path === remembered && (
+              <Badge variant="outline" className="shrink-0">
+                library default
+              </Badge>
+            )}
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              {bytes(file.bytes)}
+            </span>
+          </button>
+          <Tooltip
+            label={
+              file.path === remembered
+                ? "forget it — this library will have no default reranker"
+                : "remember it in the index, so `--rerank` needs no path here or in a terminal"
+            }
+          >
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0"
+              disabled={busy}
+              onClick={() => onRemember(file.path === remembered ? null : file.path)}
+            >
+              <Star
+                className={cn(
+                  "size-3",
+                  file.path === remembered && "fill-amber-400 text-amber-400",
+                )}
+              />
+            </Button>
+          </Tooltip>
+        </div>
       ))}
     </div>
   );

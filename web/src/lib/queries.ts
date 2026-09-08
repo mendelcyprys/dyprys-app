@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type JobKind, type Libraries } from "@/lib/api";
+import { api, type JobKind, type Libraries, type Role } from "@/lib/api";
 
 export const keys = {
   libraries: ["libraries"] as const,
@@ -185,5 +185,38 @@ export function useAsked(library: string | null, find?: string) {
     queryKey: ["asked", library, find ?? ""] as const,
     queryFn: () => api.asked(library!, 12, find),
     enabled: Boolean(library),
+  });
+}
+
+export function useOllama(enabled: boolean) {
+  return useQuery({
+    queryKey: ["ollama"] as const,
+    queryFn: api.ollama,
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useDefaults(library: string | null) {
+  return useQuery({
+    queryKey: ["defaults", library] as const,
+    queryFn: () => api.defaults(library!),
+    enabled: Boolean(library),
+  });
+}
+
+/**
+ * Remember a model for this library.
+ *
+ * The write lands in the index, not in this browser, so it is the same setting
+ * `dyp models --summariser` writes and the same one `--summarise` with no name
+ * reads. That is the point: one library, one answer.
+ */
+export function useRemember(library: string) {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ role, model }: { role: Role; model: string | null }) =>
+      api.remember(library, role, model),
+    onSuccess: (payload) => cache.setQueryData(["defaults", library], payload),
   });
 }

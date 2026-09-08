@@ -1128,6 +1128,77 @@ def books_payload(conn, pattern: str | None = None) -> dict:
 WEIGHTS_SUFFIX = ".gguf"
 
 
+# The optional roles, and the shape each one's value takes. `expander` and
+# `summariser` name an ollama model; `reranker` is a path to a cross-encoder
+# GGUF. Kept here rather than in a frontend because both frontends set them and
+# the validation is the same one twice.
+ROLES = ("expander", "summariser", "reranker")
+
+
+def installed_models(host: str = "http://localhost:11434",
+                     timeout: float = 0.7) -> list[str]:
+    """What the local ollama server has, or [] if it is not running.
+
+    A short timeout on purpose: the server is local, so it answers in
+    milliseconds or it is not there, and a listing that pauses three seconds to
+    discover nothing is worse than one that says nothing.
+
+    Takes the host as an argument rather than reading it, so the two frontends
+    can differ about where ollama lives without this knowing which is asking.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=timeout) as response:
+            return sorted(m["name"] for m in _json.loads(response.read()).get("models", []))
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        return []
+
+
+def defaults_payload(conn) -> dict:
+    """What this library remembers for each optional role."""
+    return {"defaults": {role: default_model(conn, role) for role in ROLES}}
+
+
+def remember_model(conn, role: str, value, *, known=None) -> dict:
+    """Store a default optional model for this library, or forget one.
+
+    Validated when it is set rather than when it is next needed, because the two
+    can be weeks apart -- a typo stored today should not surface as a failed
+    search in a fortnight. `known` is what the machine actually has, when the
+    caller was able to find out; a name that is not among them is refused with
+    them as the choices, which is what makes a picker possible.
+    """
+    if role not in ROLES:
+        raise errors.BadRequest(
+            f"no such role {role!r}", choices=list(ROLES), role=role)
+
+    wanted = (value or "").strip() if isinstance(value, str) else value
+    if wanted in (None, "", "none", "off"):
+        with conn:
+            conn.execute("DELETE FROM meta WHERE key = ?", (f"model.{role}",))
+        db.record_event(conn, "default", f"{role} = none")
+        return defaults_payload(conn)
+
+    if role == "reranker":
+        # A path, not a name: a cross-encoder is a file on this machine, and one
+        # that is not there now will not be there when a search needs it.
+        if not Path(wanted).exists():
+            raise errors.ModelUnavailable(
+                f"no such file: {wanted}. A reranker is a cross-encoder .gguf "
+                f"on this machine.", role=role)
+    elif known is not None and wanted not in known and f"{wanted}:latest" not in known:
+        raise errors.ModelUnavailable(
+            f"nothing installed is named {wanted!r}", choices=list(known), role=role)
+
+    with conn:
+        db.set_meta(conn, f"model.{role}", wanted)
+    db.record_event(conn, "default", f"{role} = {wanted}")
+    return defaults_payload(conn)
+
+
 def available_models(directories) -> dict:
     """The model files on this machine, under directories the caller chose.
 

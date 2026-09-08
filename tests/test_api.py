@@ -726,3 +726,97 @@ def test_a_dropped_stream_marks_the_search_abandoned(client):
 
     assert marked, "the stream ended without telling the search that it had"
     assert marked[0].cancelled() is True
+
+
+# --------------------------------------------------------------------------
+# What a library remembers
+# --------------------------------------------------------------------------
+
+
+def test_a_default_set_here_is_the_one_the_terminal_uses(client, index, monkeypatch):
+    """One library, one answer to "which summariser" — not one per frontend.
+
+    The value goes in the index's own meta, which is where `dyp ask` reads it
+    from, so `summarise: true` (meaning "whatever this library remembers") means
+    the same thing in both places.
+    """
+    from dyprys import db, service
+
+    monkeypatch.setattr(service, "installed_models", lambda *a, **k: ["gemma3:4b"])
+
+    stored = client.post("/api/libraries/test/defaults",
+                         json={"role": "summariser", "model": "gemma3:4b"})
+
+    assert stored.status_code == 200
+    assert stored.json()["defaults"]["summariser"] == "gemma3:4b"
+    directory, _ = index
+    conn = db.connect(directory)
+    assert service.default_model(conn, "summariser") == "gemma3:4b"
+    conn.close()
+
+
+def test_a_model_this_machine_does_not_have_is_refused_with_the_ones_it_does(
+        client, monkeypatch):
+    """Validated when set, not when needed: the two can be weeks apart, and a
+    typo stored today should not surface as a failed search in a fortnight."""
+    from dyprys import service
+
+    monkeypatch.setattr(service, "installed_models", lambda *a, **k: ["gemma3:4b"])
+
+    refused = client.post("/api/libraries/test/defaults",
+                          json={"role": "summariser", "model": "gemma9:99b"})
+
+    assert refused.status_code == 503
+    assert refused.json()["choices"] == ["gemma3:4b"]
+    assert refused.json()["role"] == "summariser"
+
+
+def test_a_default_is_stored_when_ollama_cannot_be_asked(client, monkeypatch):
+    """A refusal because the server happens to be down would be worse than
+    storing a name that is in fact there."""
+    from dyprys import service
+
+    monkeypatch.setattr(service, "installed_models", lambda *a, **k: [])
+
+    stored = client.post("/api/libraries/test/defaults",
+                         json={"role": "summariser", "model": "gemma3:4b"})
+
+    assert stored.status_code == 200
+    assert stored.json()["defaults"]["summariser"] == "gemma3:4b"
+
+
+def test_a_reranker_default_is_a_path_that_has_to_exist(client, tmp_path):
+    """A cross-encoder is a file, and one that is not there now will not be
+    there when a search needs it."""
+    missing = client.post("/api/libraries/test/defaults",
+                          json={"role": "reranker", "model": str(tmp_path / "nope.gguf")})
+    assert missing.status_code == 503
+
+    real = tmp_path / "cross.gguf"
+    real.write_bytes(b"not really weights")
+    stored = client.post("/api/libraries/test/defaults",
+                         json={"role": "reranker", "model": str(real)})
+
+    assert stored.status_code == 200
+    assert stored.json()["defaults"]["reranker"] == str(real)
+
+
+def test_a_default_can_be_forgotten(client, monkeypatch):
+    from dyprys import service
+
+    monkeypatch.setattr(service, "installed_models", lambda *a, **k: ["gemma3:4b"])
+    client.post("/api/libraries/test/defaults",
+                json={"role": "summariser", "model": "gemma3:4b"})
+
+    cleared = client.post("/api/libraries/test/defaults",
+                          json={"role": "summariser", "model": None})
+
+    assert cleared.json()["defaults"]["summariser"] is None
+
+
+def test_a_role_that_is_not_one_says_which_are(client):
+    refused = client.post("/api/libraries/test/defaults",
+                          json={"role": "embedder", "model": "x"})
+
+    assert refused.status_code == 400
+    assert refused.json()["choices"] == ["expander", "summariser", "reranker"]

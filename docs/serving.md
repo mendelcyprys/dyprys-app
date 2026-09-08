@@ -22,6 +22,7 @@ files on the network. `dyp serve` says so on stderr if you do it anyway.
 
 ```
 GET    /api/health                            is it up, and which models are warm
+GET    /api/ollama                            what the local ollama server has
 GET    /api/libraries                         every registered library
 POST   /api/libraries                         name a directory on this machine
 DELETE /api/libraries/{name}                  forget a name; files untouched
@@ -31,6 +32,8 @@ GET    /api/libraries/{name}/check?deep=      what drifted, what is outstanding
 GET    /api/libraries/{name}/books?pattern=   what is in the library
 GET    /api/libraries/{name}/models           what embedded it, how far
 GET    /api/libraries/{name}/models/available the .gguf files on this machine
+GET    /api/libraries/{name}/defaults         what this library remembers
+POST   /api/libraries/{name}/defaults         remember one, or forget it
 POST   /api/libraries/{name}/models/{m}/alias a short name to type
 GET    /api/libraries/{name}/history?limit=   embed runs and index operations
 GET    /api/libraries/{name}/asked?limit=&find=&which=
@@ -201,6 +204,25 @@ Nothing here guesses what a file *is*. A cross-encoder and a chat model are both
 a `.gguf` and the difference is not in the name; a guess reported as a fact
 would be worse than nothing, since a chat model used as a reranker rescores
 silently and plausibly.
+
+`GET/POST /defaults` is the browser's `dyp models --summariser NAME`. The three
+optional roles — `expander`, `summariser`, `reranker` — are **never remembered
+from being used**; each is stored only when set on purpose, and until then every
+search has to name its model. Setting one writes into the *index*, so a default
+chosen in a browser is the one `dyp ask --summarise` reads in a terminal: one
+library, one answer.
+
+Validated when set rather than when needed, because the two can be weeks apart
+and a typo stored today should not surface as a failed search in a fortnight. A
+name ollama does not have is a 503 carrying the installed ones as `choices`; a
+reranker path that is not on disk is a 503 too. If ollama cannot be reached at
+all the name is stored anyway — a refusal because the server happens to be down
+would be worse than storing a name that is in fact there. `null` forgets one.
+
+`GET /api/ollama` lists what the local server has, so the choice can be a picker
+rather than a typed name. It is a machine fact rather than a library one, which
+is why it sits outside `/libraries`. `$OLLAMA_HOST` is read there and nowhere
+below the frontends.
 
 `POST /models/{model}/alias` gives a model a short name.
 `hf_ggml-org_embeddinggemma-300M-Q8_0@b5ce9d77a3fc` identifies weights exactly

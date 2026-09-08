@@ -26,8 +26,9 @@ export function Results({
 }: {
   answered: Answered;
   scope: string[];
-  /** Which row j/k is on. Presentation only — it never reorders anything. */
-  cursor: number;
+  /** Which row j/k is on, or null before either has been pressed. Presentation
+   *  only — it never reorders anything. */
+  cursor: number | null;
   onRead: (reading: Reading) => void;
 }) {
   return (

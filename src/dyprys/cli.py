@@ -1960,15 +1960,7 @@ def ollama_models(host: str = "http://localhost:11434", timeout: float = 0.7) ->
     three seconds to discover nothing is worse than one that says nothing. The
     server is local: it answers in milliseconds or it is not there.
     """
-    import json
-    import urllib.error
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(f"{host}/api/tags", timeout=timeout) as response:
-            return sorted(m["name"] for m in json.loads(response.read()).get("models", []))
-    except (urllib.error.URLError, OSError, ValueError, KeyError):
-        return []
+    return service.installed_models(host, timeout)
 
 
 def _print_optional_models(conn=None) -> None:

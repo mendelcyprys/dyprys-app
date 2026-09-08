@@ -292,6 +292,11 @@ export interface AskedRow {
   };
 }
 
+export type Role = "expander" | "summariser" | "reranker";
+
+/** What a library remembers, and so what a bare `true` resolves to. */
+export type Defaults = Record<Role, string | null>;
+
 export interface Health {
   ok: boolean;
   loaded: Record<string, string[]>;
@@ -371,6 +376,19 @@ export const api = {
       `/libraries/${encodeURIComponent(name)}/asked?limit=${limit}` +
         (find ? `&find=${encodeURIComponent(find)}` : ""),
     ),
+
+  /** What the local ollama server has. A machine fact, not a library one. */
+  ollama: () => request<{ models: string[]; host: string }>("/ollama"),
+
+  defaults: (name: string) =>
+    request<{ defaults: Defaults }>(`/libraries/${encodeURIComponent(name)}/defaults`),
+
+  /** Stored in the index, so `dyp ask` in a terminal reads the same answer. */
+  remember: (name: string, role: Role, model: string | null) =>
+    post<{ defaults: Defaults }>(`/libraries/${encodeURIComponent(name)}/defaults`, {
+      role,
+      model,
+    }),
 
   status: (name: string) => request<unknown>(`/libraries/${encodeURIComponent(name)}/status`),
 

@@ -82,14 +82,18 @@ than the one-in-twenty-five above, which assumes a current profile. Re-run
 `dyp route` after every `add` + `embed`; `dyp check` says how many books are
 waiting, and search warns when it is routing around some.
 
-**`--rerank` needs a second model that the index does not remember.** It takes a
-cross-encoder GGUF — not an ollama chat name — via `--reranker PATH` or
-`$DYPRYS_RERANKER`, and bare `--rerank` errors rather than falling back to
-anything. Unlike the expander and summariser, whose defaults are stored in the
-index once used (`dyp history` shows them), **the reranker is not remembered
-between runs**: pass `--reranker` on every `ask`, or set `$DYPRYS_RERANKER` for
-the session. If neither is set and the user has not named a cross-encoder, ask
-where theirs is rather than guessing a path.
+**`--rerank` needs a second model, and bare `--rerank` errors rather than
+falling back to anything.** It takes a cross-encoder GGUF — not an ollama chat
+name — via `--reranker PATH`, `$DYPRYS_RERANKER`, or a default stored in the
+index.
+
+**No optional model is remembered from being used.** The expander, summariser
+and reranker are each stored only when set on purpose:
+`dyp models --summariser gemma3:4b`, `--expander`, `--reranker PATH.gguf`
+(`none` forgets one). `dyp models` shows what a library currently remembers, and
+`dyp history` the setting of it. Until one is set, every search must name the
+model or say `$DYPRYS_*`; if none is set and the user has not named one, ask
+rather than guessing a path.
 
 **Reach for `--rerank` whenever the rank matters and you can spare the seconds.**
 It rescores results already found, so it cannot recover an answer the search

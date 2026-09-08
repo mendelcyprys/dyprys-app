@@ -332,6 +332,46 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         return _json(await indexes.run(
             name, lambda s: service.name_model(s.conn, model, body.get("alias", ""))))
 
+    @app.get("/api/ollama")
+    async def ollama():
+        """What the local ollama server has, for the roles that name a model.
+
+        A machine fact rather than a library one, so it is not under a library.
+        `$OLLAMA_HOST` is read here and nowhere below: where ollama lives is a
+        property of the process, and a core module that read it could only ever
+        serve the shell that started this one.
+        """
+        host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+        return _json({"models": service.installed_models(host), "host": host})
+
+    @app.get("/api/libraries/{name}/defaults")
+    async def defaults(name: str):
+        """What this library remembers for expander, summariser and reranker."""
+        return _json(await indexes.run(
+            name, lambda s: service.defaults_payload(s.conn)))
+
+    @app.post("/api/libraries/{name}/defaults")
+    async def remember(name: str, body: dict = Body(default_factory=dict)):
+        """Remember one, or forget it with a null.
+
+        Stored in the index, so a default set here is the one `dyp ask` uses in
+        a terminal — there is one library and one answer to "which summariser",
+        not one per frontend.
+        """
+        unknown = set(body) - {"role", "model"}
+        if unknown:
+            raise errors.BadRequest(
+                f"unknown field(s): {', '.join(sorted(unknown))}. Takes: role, model.")
+        role = body.get("role", "")
+        # Checked against what is actually installed, and only when ollama
+        # answers: a refusal because the server happens to be down would be
+        # worse than storing a name that is there.
+        host = os.environ.get("OLLAMA_HOST") or "http://localhost:11434"
+        known = service.installed_models(host) if role != "reranker" else None
+        return _json(await indexes.run(
+            name, lambda s: service.remember_model(
+                s.conn, role, body.get("model"), known=known or None)))
+
     @app.get("/api/libraries/{name}/models/available")
     async def available_models(name: str):
         """The .gguf files on this machine, so a reranker can be chosen.
