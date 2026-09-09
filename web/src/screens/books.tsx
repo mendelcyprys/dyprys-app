@@ -1,58 +1,112 @@
 import * as React from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FileX2, Info, Search, X } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  FileX2,
+  FolderOpen,
+  Info,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tooltip } from "@/components/ui/tooltip";
 import { CoverageBar, shortModel } from "@/components/coverage";
-import type { BookRow } from "@/lib/api";
+import { RemoveBooks } from "@/components/remove-dialog";
+import type { BookRow, Shelf } from "@/lib/api";
 import { useDebounced } from "@/lib/debounce";
-import { useBooks } from "@/lib/queries";
+import { useBooks, useShelves } from "@/lib/queries";
 import { useSelection } from "@/lib/selection";
 import { bytes, cn, count } from "@/lib/utils";
 import { BookSheet } from "./book-sheet";
 import { Reader, type Reading } from "./reader";
 
-const ROW = 56;
+const BOOK_ROW = 56;
+const SHELF_ROW = 60;
 
-/** The directory a book sits in — what distinguishes two books of one name. */
-function shelf(key: string): string {
-  const parts = key.split("/").filter(Boolean);
-  return parts[parts.length - 2] ?? key;
-}
+/** Past this many books, shelves start closed: the point of the level is that
+ *  a 3,453-book library is three rows before it is three thousand. */
+const FOLD_ABOVE = 60;
+
+type Row = { kind: "shelf"; shelf: Shelf; showing: number } | { kind: "book"; book: BookRow };
 
 /**
- * What is in the library, and what the next question will be asked of.
+ * A library holds shelves; a shelf holds books.
  *
- * Virtualised because `neuro` holds 3,453 books and this is a list a person
- * scrolls rather than pages. Filtered on the **server**, through the same
- * matcher `-c` uses, so that what the box finds and what selecting it means are
- * one thing rather than two that agree most of the time.
+ * The middle level was always there — `-c papers/` has always meant one shelf,
+ * `dyp embed -c` fills one at a time — and only the flat list did not show it.
+ * On `neuro` that flat list is 3,453 rows with no structure at all; as shelves
+ * it is three: 1,679 scanned texts, 1,657 Gutenberg books, 117 extracted
+ * neuroscience PDFs. Which of those three a question should be asked of is the
+ * most useful thing anyone can know about that library, and it was invisible.
+ *
+ * Rows are one flat virtualised list of two kinds, rather than a list of lists,
+ * so a shelf of 1,657 books costs the same to render as one of three.
  */
 export function Books({ library }: { library: string }) {
   const [filter, setFilter] = React.useState("");
   const pattern = useDebounced(filter);
   const books = useBooks(library, pattern);
+  const shelves = useShelves(library);
   const { scope, setScope } = useSelection();
   const viewport = React.useRef<HTMLDivElement>(null);
   // Which book is open, by key rather than by value: the row is re-fetched
   // after a rename, and a copy taken at click time would show the old name.
   const [opened, setOpened] = React.useState<string | null>(null);
   const [reading, setReading] = React.useState<Reading | null>(null);
+  const [removing, setRemoving] = React.useState<Shelf | null>(null);
+  const [shut, setShut] = React.useState<Set<string> | null>(null);
 
-  const rows = books.data?.books ?? [];
+  const found = books.data?.books ?? [];
+  const shelfRows = shelves.data?.shelves ?? [];
   const chosen = React.useMemo(() => new Set(scope), [scope]);
+
+  // Closed by default on a big library, open on a small one — and always open
+  // while filtering, because the filter is the thing being looked at and
+  // hiding its matches inside a closed row is answering a different question.
+  const closed = React.useMemo(() => {
+    if (pattern) return new Set<string>();
+    if (shut) return shut;
+    const many = found.length > FOLD_ABOVE && shelfRows.length > 1;
+    return many ? new Set(shelfRows.map((shelf) => shelf.path)) : new Set<string>();
+  }, [shut, pattern, found.length, shelfRows]);
+
+  const rows: Row[] = React.useMemo(() => {
+    const byShelf = new Map<string, BookRow[]>();
+    for (const book of found) {
+      const list = byShelf.get(book.shelf);
+      if (list) list.push(book);
+      else byShelf.set(book.shelf, [book]);
+    }
+    const known = new Map(shelfRows.map((shelf) => [shelf.path, shelf]));
+    const out: Row[] = [];
+    // Shelf order comes from the shelves query, so it does not reshuffle as a
+    // filter narrows the books. A shelf a filter emptied is simply not shown.
+    for (const path of [...known.keys()].sort()) {
+      const here = byShelf.get(path);
+      if (!here?.length) continue;
+      const shelf = known.get(path)!;
+      out.push({ kind: "shelf", shelf, showing: here.length });
+      if (!closed.has(path)) {
+        for (const book of here) out.push({ kind: "book", book });
+      }
+    }
+    return out;
+  }, [found, shelfRows, closed]);
 
   const virtual = useVirtualizer({
     count: rows.length,
     getScrollElement: () => viewport.current,
-    estimateSize: () => ROW,
+    estimateSize: (index) => (rows[index]?.kind === "shelf" ? SHELF_ROW : BOOK_ROW),
     overscan: 12,
   });
 
-  const shownKeys = rows.map((row) => row.key);
+  const shownKeys = found.map((row) => row.key);
   const allShown = shownKeys.length > 0 && shownKeys.every((key) => chosen.has(key));
   const someShown = !allShown && shownKeys.some((key) => chosen.has(key));
 
@@ -68,7 +122,30 @@ export function Books({ library }: { library: string }) {
     );
   }
 
-  const models = Object.keys(rows[0]?.live_chunks ?? {});
+  /**
+   * A shelf enters the scope as **one pattern** — its directory — rather than
+   * as its books. `-c` matches a path, so `…/Talmud` is exactly the scope a
+   * terminal would write, it survives books being added to that shelf, and it
+   * is one line in the rail instead of 1,657.
+   */
+  function toggleShelf(shelf: Shelf) {
+    setScope(
+      chosen.has(shelf.directory)
+        ? scope.filter((each) => each !== shelf.directory)
+        : [...new Set([...scope, shelf.directory])],
+    );
+  }
+
+  function fold(path: string) {
+    setShut((current) => {
+      const next = new Set(current ?? closed);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
+  const models = Object.keys(found[0]?.live_chunks ?? {});
 
   /**
    * Titles that more than one book here answers to.
@@ -79,18 +156,19 @@ export function Books({ library }: { library: string }) {
    * the screen where that rule is easiest to break: the path is there, in grey,
    * three points smaller than the name.
    *
-   * So a colliding title gets the shelf it came from beside it. Computed from
-   * the rows already loaded rather than asked of the server, because it is a
-   * property of what is on screen.
+   * With shelves shown, the shelf is usually what tells them apart, so that is
+   * what the badge says.
    */
   const collides = React.useMemo(() => {
     const seen = new Map<string, number>();
-    for (const row of rows) {
+    for (const row of found) {
       const name = row.label ?? row.title;
       seen.set(name, (seen.get(name) ?? 0) + 1);
     }
     return new Set([...seen].filter(([, n]) => n > 1).map(([name]) => name));
-  }, [rows]);
+  }, [found]);
+
+  const aside = found.filter((book) => book.set_aside).length;
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -114,7 +192,7 @@ export function Books({ library }: { library: string }) {
           )}
         </div>
 
-        {pattern && rows.length > 0 && (
+        {pattern && found.length > 0 && (
           <Tooltip label="scope to every book this filter matches, as one pattern rather than a list">
             <Button
               size="sm"
@@ -132,10 +210,19 @@ export function Books({ library }: { library: string }) {
         <span>
           {books.isLoading
             ? "reading…"
-            : `${rows.length.toLocaleString()} book${rows.length === 1 ? "" : "s"}${
-                pattern ? " matching" : ""
-              }`}
+            : `${count(found.length, "book")}${pattern ? " matching" : ""} on ${count(
+                rows.filter((row) => row.kind === "shelf").length,
+                "shelf",
+                "shelves",
+              )}`}
         </span>
+        {aside > 0 && (
+          <Tooltip label="set aside: still here, still embedded, and returned by no search">
+            <Badge variant="outline" className="font-normal">
+              <Archive className="size-2.5" /> {aside} set aside
+            </Badge>
+          </Tooltip>
+        )}
         {scope.length > 0 && (
           <>
             <span className="ml-auto">{scope.length} in scope</span>
@@ -153,34 +240,51 @@ export function Books({ library }: { library: string }) {
           </p>
         )}
         <div style={{ height: virtual.getTotalSize(), position: "relative" }}>
-          {virtual.getVirtualItems().map((item) => (
-            <div
-              key={rows[item.index].key}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: "100%",
-                height: item.size,
-                transform: `translateY(${item.start}px)`,
-              }}
-            >
-              <Book
-                book={rows[item.index]}
-                models={models}
-                chosen={chosen.has(rows[item.index].key)}
-                onToggle={() => toggle(rows[item.index].key)}
-                onOpen={() => setOpened(rows[item.index].key)}
-                shared={collides.has(rows[item.index].label ?? rows[item.index].title)}
-              />
-            </div>
-          ))}
+          {virtual.getVirtualItems().map((item) => {
+            const row = rows[item.index];
+            return (
+              <div
+                key={row.kind === "shelf" ? `shelf:${row.shelf.path}` : row.book.key}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: item.size,
+                  transform: `translateY(${item.start}px)`,
+                }}
+              >
+                {row.kind === "shelf" ? (
+                  <ShelfHead
+                    shelf={row.shelf}
+                    showing={row.showing}
+                    filtered={Boolean(pattern)}
+                    closed={closed.has(row.shelf.path)}
+                    scoped={chosen.has(row.shelf.directory)}
+                    models={models}
+                    onFold={() => fold(row.shelf.path)}
+                    onScope={() => toggleShelf(row.shelf)}
+                    onRemove={() => setRemoving(row.shelf)}
+                  />
+                ) : (
+                  <Book
+                    book={row.book}
+                    models={models}
+                    chosen={chosen.has(row.book.key)}
+                    onToggle={() => toggle(row.book.key)}
+                    onOpen={() => setOpened(row.book.key)}
+                    shared={collides.has(row.book.label ?? row.book.title)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
       <BookSheet
         library={library}
-        book={rows.find((row) => row.key === opened) ?? null}
+        book={found.find((row) => row.key === opened) ?? null}
         onClose={() => setOpened(null)}
         onRead={(book) => {
           const first = book.sources.find((source) => source.present) ?? book.sources[0];
@@ -194,7 +298,126 @@ export function Books({ library }: { library: string }) {
           setOpened(null);
         }}
       />
+      {removing && (
+        <RemoveBooks
+          library={library}
+          what={{ shelf: removing.directory }}
+          // The relative path, not the last segment: "the old shelf" could be
+          // `papers/old` or `notes/old`, and this is the sentence someone
+          // confirms an irreversible action against.
+          subject={`the ${removing.path || removing.name} shelf`}
+          books={removing.books}
+          setAside={removing.set_aside}
+          open
+          onOpenChange={(next) => !next && setRemoving(null)}
+          onRemoved={() => setScope(scope.filter((each) => each !== removing.directory))}
+        />
+      )}
       <Reader library={library} reading={reading} onClose={() => setReading(null)} />
+    </div>
+  );
+}
+
+/**
+ * One shelf, and everything a person decides about a shelf from one row.
+ *
+ * The counts are the library's, not the filter's: a filter narrows what is
+ * listed under the header, and a header that shrank with it would say the
+ * Talmud shelf holds two books because two of them matched "Arakhin".
+ */
+function ShelfHead({
+  shelf,
+  showing,
+  filtered,
+  closed,
+  scoped,
+  models,
+  onFold,
+  onScope,
+  onRemove,
+}: {
+  shelf: Shelf;
+  showing: number;
+  filtered: boolean;
+  closed: boolean;
+  scoped: boolean;
+  models: string[];
+  onFold: () => void;
+  onScope: () => void;
+  onRemove: () => void;
+}) {
+  const allAside = shelf.set_aside >= shelf.books && shelf.books > 0;
+  return (
+    <div
+      onClick={onFold}
+      className={cn(
+        "flex h-full cursor-pointer items-center gap-2.5 border-b bg-muted/50 px-3 transition-colors hover:bg-muted",
+        scoped && "bg-accent/60 hover:bg-accent/70",
+        allAside && "opacity-60",
+      )}
+    >
+      <Checkbox
+        checked={scoped}
+        onCheckedChange={onScope}
+        aria-label={`ask only the ${shelf.name} shelf`}
+      />
+      {closed ? (
+        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+      ) : (
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {/* The relative path, not the last segment: `gutenberg` and
+              `scale_texts/gutenberg` are one word for two shelves, and telling
+              them apart is the whole point of showing this level. */}
+          <span className="truncate text-sm font-semibold">{shelf.path || shelf.name}</span>
+          {shelf.set_aside > 0 && (
+            <Tooltip label="set aside: still here, still embedded, and returned by no search">
+              <Badge variant="outline" className="shrink-0 font-normal">
+                <Archive className="size-2.5" />
+                {allAside ? "set aside" : `${shelf.set_aside} set aside`}
+              </Badge>
+            </Tooltip>
+          )}
+        </div>
+        <p className="truncate text-[10px] text-muted-foreground">
+          {filtered ? `${showing.toLocaleString()} of ` : ""}
+          {count(shelf.books, "book")} · {shelf.chunks.toLocaleString()} chunks ·{" "}
+          {bytes(shelf.bytes)}
+        </p>
+      </div>
+
+      <Tooltip label="set the whole shelf aside, or remove it">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+          onClick={(event) => {
+            event.stopPropagation();
+            onRemove();
+          }}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </Tooltip>
+
+      <div className="hidden w-44 shrink-0 flex-col gap-0.5 lg:flex">
+        {models.map((model) => {
+          const live = shelf.live_chunks[model] ?? 0;
+          const done = shelf.embedded[model] ?? 0;
+          return (
+            <span key={model} className="flex items-center gap-1.5">
+              <span className="w-20 truncate font-mono text-[10px] text-muted-foreground">
+                {shortModel(model)}
+              </span>
+              <CoverageBar fraction={live ? done / live : 0} />
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -224,21 +447,34 @@ function Book({
     <div
       onClick={onToggle}
       className={cn(
-        "flex h-full cursor-pointer items-center gap-3 border-b px-3 text-sm transition-colors hover:bg-accent/40",
+        "flex h-full cursor-pointer items-center gap-3 border-b pl-9 pr-3 text-sm transition-colors hover:bg-accent/40",
         chosen && "bg-accent/60",
+        // Present, listed, and out of every search. Greying it is the whole
+        // signal: a set-aside book that looked like the others would be the
+        // second-best way to make results inexplicable.
+        book.set_aside && "opacity-50",
       )}
     >
       <Checkbox checked={chosen} onCheckedChange={onToggle} />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{book.label ?? book.title}</span>
+          <span className={cn("truncate font-medium", book.set_aside && "line-through")}>
+            {book.label ?? book.title}
+          </span>
+          {book.set_aside && (
+            <Tooltip label="set aside: still here, still embedded, and returned by no search. Open it to put it back.">
+              <Badge variant="outline" className="shrink-0 font-normal">
+                <Archive className="size-2.5" /> set aside
+              </Badge>
+            </Tooltip>
+          )}
           {shared && (
             // The shelf it came from, which is what actually tells these apart.
             // A name alone is not enough to cite by and not enough to pick by.
             <Tooltip label="another book here has this name — these are different works, and only the path says which is which. Give one a name to tell them apart.">
               <Badge variant="warning" className="shrink-0 font-mono">
-                {shelf(book.key)}
+                {book.shelf || "root"}
               </Badge>
             </Tooltip>
           )}
@@ -265,7 +501,7 @@ function Book({
         <div className="tabular-nums">{bytes(size)}</div>
       </div>
 
-      <Tooltip label="read it, name it, note what it is">
+      <Tooltip label="read it, name it, set it aside">
         <Button
           size="sm"
           variant="ghost"

@@ -35,7 +35,7 @@ _WHY_NO_TEXT = {
 }
 
 
-# Nineteen commands listed alphabetically tell a new reader nothing about which
+# Twenty commands listed alphabetically tell a new reader nothing about which
 # three they need today. argparse cannot group subcommands, so the flat listing
 # is replaced by this, ordered by when in a library's life you reach for it.
 COMMAND_GROUPS = """\
@@ -48,6 +48,7 @@ commands, in the order a library needs them
   every day             ask      find the passage that answers a question
                         asked    questions you have asked, and what came back
                         books    what is in the library
+                        shelves  the directories those books sit in
                         status   a summary, and what to do next
 
   while it is running   watch    follow an embedding run from another terminal
@@ -57,7 +58,7 @@ commands, in the order a library needs them
                         lexical  rebuild the keyword index
                         eval     measure retrieval against a question set
 
-  looking after it      remove   forget books
+  looking after it      remove   forget books for good
                         compact  reclaim the space they left
                         relocate the text moved: rewrite a path prefix
                         models   embedding models: coverage, names, disk
@@ -260,6 +261,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="what is worth remembering about this book: which "
                          "edition, why it is here, what its vocabulary is. "
                          "Shown wherever the book is. 'none' removes it.")
+    aside = bk.add_mutually_exclusive_group()
+    aside.add_argument("--aside", action="store_true",
+                       help="take the matching books out of every search, keeping "
+                            "their vectors — reversible with --restore")
+    aside.add_argument("--restore", action="store_true",
+                       help="put set-aside books back into the library")
+
+    sh = sub.add_parser("shelves", help="the directories this library's books sit in")
+    sh.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
+    shelf_aside = sh.add_mutually_exclusive_group()
+    shelf_aside.add_argument("--aside", metavar="SHELF",
+                             help="take every book on this shelf out of every search")
+    shelf_aside.add_argument("--restore", metavar="SHELF",
+                             help="put a shelf back into the library")
 
     md = sub.add_parser("models", help="embedding models: coverage and disk")
     md.add_argument("--json", action="store_true", help="emit as JSON for a program to parse")
@@ -479,7 +494,11 @@ def _dispatch(args, parser) -> int:
         if args.command == "books":
             if args.label is not None or args.note is not None:
                 return _describe_book(conn, args)
+            if args.aside or args.restore:
+                return _set_aside(conn, args)
             return _books(conn, args.pattern, args.json)
+        if args.command == "shelves":
+            return _shelves(conn, args)
         if args.command == "models":
             return _models(conn, where, args)
         if args.command == "lexical":
@@ -927,19 +946,6 @@ def _where(args) -> Path:
         library=getattr(args, "library", None), data=args.data, env=os.environ)
 
 
-def _sources_under(index_dir: Path) -> str | None:
-    """Where this index's text lives, so a delete can say what it is sparing."""
-    try:
-        conn = db.connect(index_dir)
-    except Exception:
-        return None
-    try:
-        row = conn.execute("SELECT path FROM sources LIMIT 1").fetchone()
-        return str(Path(row["path"]).parent) if row else None
-    finally:
-        conn.close()
-
-
 def _library(args, parser) -> int:
     """Name the libraries this installation knows about."""
     from dyprys import registry
@@ -976,20 +982,22 @@ def _library(args, parser) -> int:
             return 1
 
         if args.delete:
-            files, size = registry.contents(entry.path)
-            print(f"this would delete {entry.path}")
-            print(f"  {files} file(s), {_size(size)} — the index, its vectors and its "
-                  f"routing profile")
-            sources = _sources_under(entry.path)
-            if sources:
-                print(f"  the text itself is elsewhere and is NOT touched, e.g. {sources}")
+            # Both frontends describe this act from one place. A second copy of
+            # "what deleting an index destroys and what it spares" is exactly
+            # the drift that makes a browser and a terminal promise different
+            # things about the same irreversible button.
+            plan = service.library_deletion(args.name)
+            print(f"this would delete {plan['path']}")
+            print(f"  {plan['files']} file(s), {_size(plan['bytes'])} — the index, its "
+                  f"vectors and its routing profile")
+            if plan["sources"]:
+                print(f"  the text itself is elsewhere and is NOT touched, "
+                      f"e.g. {plan['sources']}")
             if not args.yes:
                 print("\nre-run with --yes to go ahead.", file=sys.stderr)
                 return 1
-            import shutil
-            shutil.rmtree(entry.path, ignore_errors=True)
-            registry.remove(args.name)
-            print(f"deleted {entry.path} and forgot {args.name}")
+            service.delete_library(args.name, confirm=True)
+            print(f"deleted {plan['path']} and forgot {args.name}")
             return 0
 
         registry.remove(args.name)
@@ -1531,8 +1539,12 @@ def _lexical(conn) -> int:
 
 
 def _remove(conn, args) -> int:
-    """Drop books from the index. Reclaiming their ids is a separate step."""
-    from dyprys.compact import remove_books
+    """Drop books from the index. Reclaiming their ids is a separate step.
+
+    Shares `service.drop_books` with the API, so the preview a browser shows and
+    the preview a terminal prints are the same count of the same books. Only the
+    printing is here.
+    """
     from dyprys.library import books as inspect
 
     found = inspect(conn, args.pattern)
@@ -1540,23 +1552,23 @@ def _remove(conn, args) -> int:
         print(f"no book matches {args.pattern!r}", file=sys.stderr)
         return 1
 
-    chunks = sum(b.chunks for b in found)
-    print(f"this would remove {len(found)} book(s) and {chunks:,} chunks:")
+    plan = service.drop_books(conn, found, confirm=args.yes)
+    print(f"this would remove {plan['count']} book(s) and {plan['chunks']:,} chunks:")
     for book in found[:10]:
         print(f"  {book.title}")
     if len(found) > 10:
         print(f"  … and {len(found) - 10} more")
     print("\ntheir chunk ids become dead space until `dyp compact` reclaims them.")
     print("the source files on disk are not touched.")
-    if not args.yes:
+    if not plan["removed"]:
+        # Worth naming here rather than only in the docs: this is the moment
+        # somebody decides, and the reversible option is one flag away.
+        print("\nto take them out of every search *without* losing their vectors:")
+        print(f"  dyp books {args.pattern!r} --aside")
         print("\nre-run with --yes to go ahead.", file=sys.stderr)
         return 1
 
-    remove_books(conn, {b.id for b in found})
-    db.record_event(conn, "remove",
-                    f"{len(found)} books matching {args.pattern!r}, {chunks:,} chunks "
-                    f"left reclaimable")
-    print(f"\nremoved {len(found)} book(s); {chunks:,} chunks are now reclaimable")
+    print(f"\nremoved {plan['count']} book(s); {plan['chunks']:,} chunks are now reclaimable")
     return 0
 
 
@@ -1796,6 +1808,104 @@ def _describe_book(conn, args) -> int:
         print(f"  note   {book.note}")
     if not book.label and not book.note:
         print("  no name or note set")
+    return 0
+
+
+def _set_aside(conn, args) -> int:
+    """Take books out of every search, or put them back. Nothing is deleted.
+
+    The middle setting between leaving a bad book in and running `dyp remove`.
+    On a real library that difference is concrete: `neuro` holds three books
+    whose extraction lost every word boundary, which can never match a query and
+    cost a full share of every scan. Removing them throws away the embedding;
+    setting them aside costs one UPDATE and is undone by another.
+    """
+    if not args.pattern:
+        print("--aside and --restore need a pattern saying which books",
+              file=sys.stderr)
+        return 1
+    from dyprys.library import books as inspect
+
+    found = inspect(conn, args.pattern)
+    if not found:
+        print(f"no book matches {args.pattern!r}", file=sys.stderr)
+        return 1
+
+    aside = bool(args.aside)
+    result = service.set_books_aside(conn, found, aside)
+    verb = "set aside" if aside else "put back"
+    if not result["changed"]:
+        already = "already set aside" if aside else "not set aside"
+        print(f"nothing to do — all {len(found)} matching book(s) are {already}")
+        return 0
+    print(f"{verb} {result['changed']} book(s):")
+    for book in found[:10]:
+        print(f"  {book.label or book.title}")
+    if len(found) > 10:
+        print(f"  … and {len(found) - 10} more")
+    if aside:
+        chunks = sum(b.chunks for b in found)
+        print(f"\ntheir {chunks:,} chunks stay on disk and no search reads them.")
+        print(f"put them back with: dyp books {args.pattern!r} --restore")
+    return 0
+
+
+def _shelves(conn, args) -> int:
+    """The level between a library and a book: the directories text came from."""
+    if args.aside or args.restore:
+        return _shelf_aside(conn, args)
+
+    payload = service.shelves_payload(conn)
+    rows = payload["shelves"]
+    if args.json:
+        return _emit_json(payload) or (0 if rows else 1)
+    if not rows:
+        print("no books yet — run `dyp add`", file=sys.stderr)
+        return 1
+
+    print(f"under {payload['root']}\n")
+    width = min(46, max(len(r["name"] or ".") for r in rows))
+    print(f"{'shelf':<{width}}  {'books':>7}  {'chunks':>9}  {'size':>8}  aside")
+    for row in rows:
+        # The relative path, not just the last segment: `gutenberg` and
+        # `cyprys_scale_texts/gutenberg` are the same word for two shelves, and
+        # the whole point of showing this level is telling them apart.
+        shown = row["path"] or "."
+        if len(shown) > width:
+            shown = "…" + shown[-(width - 1):]
+        aside = f"{row['set_aside']:>5,}" if row["set_aside"] else "     "
+        print(f"{shown:<{width}}  {row['books']:>7,}  {row['chunks']:>9,}  "
+              f"{_size(row['bytes']):>8}  {aside}")
+    plural = "shelf" if len(rows) == 1 else "shelves"
+    print(f"\n{len(rows)} {plural}, {sum(r['books'] for r in rows):,} books")
+    print("scope a search to one with: dyp ask \"…\" -c SHELF")
+    return 0
+
+
+def _shelf_aside(conn, args) -> int:
+    """Set a whole shelf aside, or put it back, addressed by its directory."""
+    wanted = args.aside or args.restore
+    aside = bool(args.aside)
+    rows = service.shelves_payload(conn)["shelves"]
+    # By relative path or by absolute directory, because both are on screen and
+    # a person will type whichever they read. Not a glob: this is not a search.
+    chosen = next((r for r in rows if wanted in (r["path"], r["directory"], r["name"])), None)
+    if chosen is None:
+        print(f"no shelf called {wanted!r}; `dyp shelves` lists them", file=sys.stderr)
+        return 1
+
+    books = service.books_named(conn, shelf=chosen["directory"])
+    result = service.set_books_aside(conn, books, aside)
+    if not result["changed"]:
+        already = "already set aside" if aside else "not set aside"
+        print(f"nothing to do — all {len(books)} book(s) on {chosen['name']} are {already}")
+        return 0
+    verb = "set aside" if aside else "put back"
+    print(f"{verb} {result['changed']} book(s) on {chosen['path'] or '.'}")
+    if aside:
+        print(f"their {chosen['chunks']:,} chunks stay on disk and no search reads them.")
+        print(f"put them back with: dyp shelves --restore "
+              f"{chosen['path'] or chosen['directory']}")
     return 0
 
 
@@ -2438,6 +2548,14 @@ def _check(conn, deep: bool, as_json: bool = False) -> int:
         print(f"{report.dead_chunks:,} superseded by re-ingest, reclaimable by compaction")
     if report.lexical_chunks == report.live_chunks and report.live_chunks:
         print(f"{report.lexical_chunks:,} in the BM25 index  (complete)")
+    elif report.lexical_chunks > report.live_chunks:
+        # More rows than chunks, which `dyp lexical` cannot fix -- it backfills
+        # what is missing. This is what removing books leaves behind: their FTS
+        # rows outlive them until compaction, exactly as their chunk ids do.
+        # Sending someone to `lexical` here was advice for the opposite problem.
+        print(f"{report.lexical_chunks:,} in the BM25 index  "
+              f"({report.lexical_chunks - report.live_chunks:,} for removed books, "
+              f"cleared by `dyp compact`)")
     else:
         missing = report.live_chunks - report.lexical_chunks
         print(f"{report.lexical_chunks:,} in the BM25 index  "

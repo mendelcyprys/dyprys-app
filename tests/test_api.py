@@ -14,6 +14,7 @@ it could not be proved, and a path arriving from a query string.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -180,6 +181,215 @@ def test_expand_and_summarise_accept_a_bare_true_as_well_as_a_model_name(client)
     for value in (True, "some-model"):
         response = ask(client, expand=value)
         assert response.status_code != 422, f"expand={value!r} was rejected as malformed"
+
+
+# --------------------------------------------------------------------------
+# What the browser can actually ask for
+# --------------------------------------------------------------------------
+
+WEB = Path(__file__).parent.parent / "web" / "src"
+
+# Options a person cannot set from the browser, and why each one is fine.
+# Anything not listed here must appear in the request the web frontend builds.
+NOT_OFFERED = {
+    "mode": "the browser only ever searches hybrid; the other modes are eval tools",
+    "depth": "an alias of `rerank`; the service reads `rerank or depth`",
+    "dedupe": "presentation, and the browser groups by book itself",
+    "full": "a terminal's untruncated print; meaningless over JSON",
+    "prompt": "which expander prompt to use — config, not a search someone asks for",
+    "expander": "folded into `expand`, which is `bool | str` for exactly this",
+    "summariser": "folded into `summarise`, same reason",
+    "reranker": "sent, but only alongside `rerank`",
+}
+
+
+def _web_search_body() -> set[str]:
+    """The keys `ask.tsx` puts in the request it POSTs."""
+    import re
+
+    source = (WEB / "screens" / "ask.tsx").read_text()
+    block = re.search(r"const body: SearchBody = \{(.*?)\n    \};", source, re.S)
+    assert block, "ask.tsx no longer builds a `SearchBody` literal"
+    return set(re.findall(r"^      (\w+):", block.group(1), re.M))
+
+
+def test_the_browser_sends_every_search_option_a_person_can_choose():
+    """The bug this exists to catch, which nothing else could.
+
+    `route` was declared on the browser's `SearchBody` type and never set, so
+    every search from the web UI read the whole library — on a 3,453-book index
+    as readily as a 20-book one — and nothing failed, nothing warned, and no
+    test noticed. A typed field nobody sends is invisible from either side:
+    Python sees a valid request with `route=0`, TypeScript sees an optional
+    property.
+
+    So the contract is stated the only way it can be: every field of
+    `SearchOptions` is either in the request the browser builds or in
+    `NOT_OFFERED` with a reason. Adding a flag to the service now fails here
+    until someone decides which it is.
+    """
+    known = {f.name for f in dataclasses.fields(service.SearchOptions)}
+    sent = _web_search_body()
+
+    stale = set(NOT_OFFERED) - known
+    assert not stale, f"NOT_OFFERED names options the service no longer has: {sorted(stale)}"
+
+    unreachable = known - sent - set(NOT_OFFERED)
+    assert not unreachable, (
+        f"the browser cannot set {sorted(unreachable)} — add it to the request in "
+        f"web/src/screens/ask.tsx, or to NOT_OFFERED above with the reason it is not offered")
+
+
+def test_the_browsers_routing_default_is_the_one_a_bare_route_flag_has():
+    """`--route` and the sheet's switch must mean the same search.
+
+    `settings-sheet.tsx` spells the default rather than fetching it, the same
+    trade `cli.py` makes for the rerank depth: a constant is not worth a request
+    on every render. The cost of the literal is this test — without it the
+    browser and a terminal could quietly run different searches under one name.
+    """
+    import re
+
+    from dyprys.routing import DEFAULT_BOOKS
+
+    source = (WEB / "rail" / "settings-sheet.tsx").read_text()
+    found = re.search(r"const DEFAULT_ROUTE = (\d+);", source)
+    assert found, "no DEFAULT_ROUTE found in settings-sheet.tsx"
+    assert int(found.group(1)) == DEFAULT_BOOKS, (
+        f"the sheet routes to {found.group(1)} books, `dyp ask --route` to {DEFAULT_BOOKS}")
+
+
+@pytest.fixture
+def profiled(index):
+    """The same index with a routing profile, so `route` is a real request.
+
+    Without one every routed search is `no_routing_profile` and a test cannot
+    tell "routing is refused because it was combined with something" from
+    "routing was never built here".
+    """
+    from dyprys import db
+    from dyprys.routing import build_centroids
+
+    directory, (embedder, model_id, store) = index
+    conn = db.connect(directory)
+    try:
+        build_centroids(conn, directory, store, model_id)
+        conn.commit()
+    finally:
+        conn.close()
+    return index
+
+
+@pytest.fixture
+def routed_client(profiled, monkeypatch):
+    directory, loaded = profiled
+    monkeypatch.setattr("dyprys.registry.resolve",
+                        lambda name: directory if name in (None, "test") else None)
+    return TestClient(api.create_app(load_model=lambda *a, **k: loaded))
+
+
+def test_a_routed_search_is_something_the_browser_can_ask_for(routed_client):
+    """`route` is an option a person sets, not a field only the CLI can fill.
+
+    It went unsent by the web frontend for the whole life of that frontend, so
+    this asserts the request itself works end to end over HTTP: the answer comes
+    back marked routed, and having read less than the whole library.
+    """
+    response = ask(routed_client, route=1)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["routed"] is True
+    assert 0 < payload["scanned_fraction"] < 1.0, (
+        "a routed search that read everything is not routing")
+
+
+def test_routing_is_not_folded_into_the_effort_control(routed_client):
+    """Routing composes with reranking, and the API must keep letting it.
+
+    They are different stages — one picks the books, the other reorders what
+    came back — and the eval harness runs them together on purpose. A request
+    asking for both is the shape the browser now sends whenever someone turns
+    routing on without turning reranking off, so it is worth one assertion that
+    the pair is not refused as a contradiction.
+    """
+    response = ask(routed_client, route=1, rerank=3)
+    # No reranker on this machine, so this is a 503 about the missing model --
+    # never a 400 about the combination, which is the thing being pinned.
+    assert response.status_code != 400, response.text
+    if response.status_code == 200:
+        assert response.json()["routed"] is True
+
+
+# --------------------------------------------------------------------------
+# Shelves, and taking books out of a library
+# --------------------------------------------------------------------------
+
+
+def test_shelves_come_back_with_the_root_they_are_relative_to(client):
+    """A relative path alone cannot be shown as a location."""
+    payload = client.get("/api/libraries/test/shelves").json()
+
+    assert payload["root"]
+    assert sum(sh["books"] for sh in payload["shelves"]) == 2
+    assert all("directory" in sh and "set_aside" in sh for sh in payload["shelves"])
+
+
+def test_setting_books_aside_needs_no_confirmation_and_reverses(client):
+    """The one removal here that costs nothing to undo, so it is one call.
+
+    The two below are irreversible and are two-step. This is the distinction the
+    API is built around, and it is worth an assertion rather than a comment.
+    """
+    keys = [b["key"] for b in client.get("/api/libraries/test/books").json()["books"]][:1]
+
+    away = client.post("/api/libraries/test/books/aside",
+                       json={"keys": keys, "aside": True}).json()
+    assert away["changed"] == 1
+
+    listed = client.get("/api/libraries/test/books").json()["books"]
+    assert sum(1 for b in listed if b["set_aside"]) == 1, (
+        "a set-aside book must still be listed -- one nothing shows is one "
+        "nobody can put back")
+
+    back = client.post("/api/libraries/test/books/aside",
+                       json={"keys": keys, "aside": False}).json()
+    assert back["changed"] == 1
+    assert all(b["set_aside"] is None
+               for b in client.get("/api/libraries/test/books").json()["books"])
+
+
+def test_a_key_that_is_not_here_is_refused_rather_than_skipped(client):
+    """Acting on four of five books someone named is worse than acting on none."""
+    response = client.post("/api/libraries/test/books/aside",
+                           json={"keys": ["/nowhere/book.txt"], "aside": True})
+    assert response.status_code == 404, response.text
+
+
+def test_removing_books_over_http_previews_first(client):
+    """`confirm` is the whole difference, and without it nothing changes."""
+    keys = [b["key"] for b in client.get("/api/libraries/test/books").json()["books"]][:1]
+
+    plan = client.post("/api/libraries/test/books/remove", json={"keys": keys}).json()
+
+    assert plan["removed"] is False
+    assert plan["count"] == 1 and plan["chunks"] > 0
+    assert len(client.get("/api/libraries/test/books").json()["books"]) == 2
+
+
+def test_deleting_an_index_over_http_previews_first(client, index):
+    """This used to have no route at all, on the grounds that a browser is the
+    wrong place to confirm days of embedding away.
+
+    The preview is that confirmation: unconfirmed it deletes nothing and returns
+    what it would take, built from the same function the terminal prints from.
+    What a browser must not have is a single unguarded call.
+    """
+    directory, _ = index
+    plan = client.delete("/api/libraries/test/index").json()
+
+    assert plan["deleted"] is False
+    assert plan["files"] > 0
+    assert Path(directory).exists()
 
 
 # --------------------------------------------------------------------------

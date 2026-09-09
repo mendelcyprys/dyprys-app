@@ -7,7 +7,7 @@ import { askStream, DyprysError, type Answered, type SearchBody, type Stage } fr
 import { usePending } from "@/lib/pending";
 import { useSelection } from "@/lib/selection";
 import { useDefaults } from "@/lib/queries";
-import { useSearchSettings } from "@/lib/settings";
+import { effortLabel, useSearchSettings } from "@/lib/settings";
 import { ModelChoices } from "@/rail/model-picker";
 import { Reader, type Reading } from "./reader";
 import { Results } from "./results";
@@ -69,6 +69,14 @@ export function Ask({ library }: { library: string }) {
       k: 5,
       model: settings.model,
       collection: scope.length ? scope : null,
+      // Its own axis, and sent whether or not anything below is on. Routing
+      // narrows which books stage 2 reads; the effort below decides how the
+      // query is written and how the results are ordered. Nothing couples them
+      // -- `_pipeline` takes the router and the reranker as separate arguments
+      // and `eval` runs a routed rerank on purpose -- so a UI that made this a
+      // step of `effort` would put the biggest speedup out of reach exactly
+      // when a large library wanted a better ranking too.
+      route: settings.route,
       // Never both. Measured, they are substitutes: together they recover the
       // same answers as the better one alone, at the sum of the costs.
       // `rerank` is the depth: how many candidates the cross-encoder rescores,
@@ -181,8 +189,16 @@ export function Ask({ library }: { library: string }) {
       </form>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        {/* What this search will do, before it does it — one badge per axis
+            that is not at its default, so "routed" and "rerank 10" can both be
+            true and both be visible. */}
         <Badge variant="outline">
-          {settings.effort === "rerank" ? `rerank ${settings.depth}` : settings.effort}
+          {settings.route > 0 ? `routed ${settings.route}` : "whole library"}
+        </Badge>
+        <Badge variant="outline">
+          {settings.effort === "rerank"
+            ? `rerank ${settings.depth}`
+            : effortLabel(settings.effort).toLowerCase()}
         </Badge>
         {scope.length > 0 && <Badge variant="outline">{count(scope.length, "book")}</Badge>}
         {settings.summarise && (

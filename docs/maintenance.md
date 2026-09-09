@@ -26,7 +26,7 @@ What it may report, and the action:
 | files missing | moved, or a drive unmounted | `dyp relocate OLD NEW`, or mount it |
 | files changed | edited since indexed | re-`dyp add`; survivors keep vectors |
 | chunks to copy | vectors that survive an edit | next `dyp embed` carries them (seconds) |
-| no word boundaries | bad extraction | re-extract or `dyp remove` (see indexing.md) |
+| no word boundaries | bad extraction | `dyp books … --aside` while you re-extract; `dyp remove` only once you are sure (see indexing.md) |
 | routing stale | books added since `dyp route` | re-`dyp route` (seconds) |
 | BM25 incomplete | keyword index behind | `dyp lexical` |
 
@@ -41,6 +41,51 @@ library is in. The one to run when unsure.
 dyp books           # every book: chunks, files, BM25 coverage
 dyp books Kandel    # matching books in full: sources, chunkings, coverage per model
 ```
+
+## `dyp shelves` — the level between a library and a book
+
+```sh
+dyp shelves                 # every shelf: books, chunks, size, how many set aside
+dyp shelves --json
+```
+
+A shelf is the directory a book's text sits in, derived from the book keys
+rather than stored, so it cannot disagree with the filesystem. It is the level
+`-c` has always cut along — `dyp ask "…" -c papers/` is one shelf — and the one
+worth looking at first: `neuro` is 3,453 books and three shelves, and which of
+the three a question belongs to matters more than any search flag.
+
+The root the paths are relative to is the deepest directory every book shares,
+which is **not** the registered library path: an index often lives beside its
+text rather than above it.
+
+A book is on exactly one shelf. `papers` and `papers/old` are two shelves rather
+than a parent and a child, so that setting one aside means one thing.
+
+## Setting books aside — removal you can undo
+
+```sh
+dyp books PATTERN --aside      # out of every search; nothing is deleted
+dyp books PATTERN --restore    # back into the library
+dyp shelves --aside SHELF      # the same, a whole shelf at a time
+dyp shelves --restore SHELF
+```
+
+Every vector, passage and BM25 row stays exactly where it is and costs nothing
+to keep; what changes is that no search reads them. `search.embedded_ranges` is
+the single place every retrieval path derives its scope from — the vector scan,
+BM25's OR of words, and BM25's exact-phrase attempt, which otherwise
+deliberately escapes `-c` — so one filter there is a filter everywhere.
+
+Reach for this when a book's extraction lost its word boundaries (it can never
+match a query and costs a full share of every scan) or when a shelf swamps every
+answer. `dyp remove` would throw away the hours that embedded it; this does not,
+and `--restore` is instant.
+
+A set-aside book is still listed by `dyp books`, marked, because one nothing
+shows is one nobody can put back. `-c` still matches it: a search that scopes to
+some set-aside books says so in `warnings`, and one whose whole scope is set
+aside refuses rather than answering from elsewhere.
 
 ## Removing books and reclaiming space
 
@@ -73,6 +118,7 @@ dyp lexical    # rebuild the keyword index from source files (rarely needed)
 
 | command | removes | keeps |
 |---|---|---|
+| `dyp books PATTERN --aside` | nothing — the books leave every search | every vector, passage and BM25 row; `--restore` undoes it |
 | `dyp remove PATTERN` | book records; their passages become dead space | every source file, every other book, all vectors |
 | `dyp compact` | dead passage ids, the tail of each vector file | every live vector |
 | `dyp models --drop NAME` | one model, its vectors, its profile | books, passages, keyword index, other models |

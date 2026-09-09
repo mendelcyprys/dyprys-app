@@ -1,11 +1,21 @@
 import * as React from "react";
-import { BookOpen, FileX2, Loader2, Pencil } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  BookOpen,
+  FileX2,
+  FolderOpen,
+  Loader2,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RemoveBooks } from "@/components/remove-dialog";
 import type { BookRow } from "@/lib/api";
-import { useDescribeBook } from "@/lib/queries";
+import { useDescribeBook, useRemoval } from "@/lib/queries";
 import { bytes, cn, count } from "@/lib/utils";
 
 /**
@@ -35,8 +45,10 @@ export function BookSheet({
   onScope: (book: BookRow) => void;
 }) {
   const describe = useDescribeBook(library);
+  const { aside } = useRemoval(library);
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [removing, setRemoving] = React.useState(false);
 
   // Reset to whatever the server holds each time a different book opens, so an
   // abandoned edit never leaks onto the next book.
@@ -61,11 +73,23 @@ export function BookSheet({
           <div className="space-y-1">
             <p className="break-all font-mono text-[10px] text-muted-foreground">{book.key}</p>
             <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              {/* Which shelf, first: it is the level above this one and the
+                  thing that tells two books of one name apart. */}
+              <span className="flex items-center gap-1">
+                <FolderOpen className="size-3" />
+                {book.shelf || "the library root"}
+              </span>
+              <span>·</span>
               <span className="tabular-nums">{count(book.chunks, "chunk")}</span>
               <span>·</span>
               <span className="tabular-nums">{bytes(size)}</span>
               <span>·</span>
               <span>{count(book.sources.length, "file")}</span>
+              {book.set_aside && (
+                <Badge variant="outline">
+                  <Archive className="size-2.5" /> set aside
+                </Badge>
+              )}
               {missing.length > 0 && (
                 <Badge variant="danger">
                   <FileX2 className="size-2.5" /> {missing.length} missing from disk
@@ -87,7 +111,53 @@ export function BookSheet({
             <Button size="sm" variant="outline" onClick={() => onScope(book)}>
               Ask only this book
             </Button>
+            {/* One click each way, and nothing is lost either way — so this is
+                a button rather than something behind a confirmation. The
+                irreversible one is not. */}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={aside.isPending}
+              onClick={() => aside.mutate({ keys: [book.key], aside: !book.set_aside })}
+            >
+              {aside.isPending ? (
+                <Loader2 className="animate-spin" />
+              ) : book.set_aside ? (
+                <ArchiveRestore />
+              ) : (
+                <Archive />
+              )}
+              {book.set_aside ? "Put back in the library" : "Set aside"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setRemoving(true)}
+            >
+              <Trash2 /> Remove…
+            </Button>
           </div>
+
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {book.set_aside ? (
+              <>
+                Set aside {new Date(book.set_aside).toLocaleDateString()}. Everything it had is
+                still here — every vector, every passage, the keyword index — and no search reads
+                any of it.
+              </>
+            ) : (
+              <>
+                Setting a book aside takes it out of every search and leaves it on disk, embedded
+                and costing nothing. It is what to reach for when a book’s extraction went wrong:
+                removing it throws away the hours that embedded it, and this does not.
+              </>
+            )}
+          </p>
+
+          {aside.error && (
+            <p className="text-xs text-destructive">{(aside.error as Error).message}</p>
+          )}
 
           <div className="space-y-3 border-t pt-4">
             <label className="flex flex-col gap-1">
@@ -159,6 +229,17 @@ export function BookSheet({
           </div>
         </div>
       </DialogContent>
+
+      <RemoveBooks
+        library={library}
+        what={{ keys: [book.key] }}
+        subject={book.label ?? book.title}
+        books={1}
+        setAside={book.set_aside ? 1 : 0}
+        open={removing}
+        onOpenChange={setRemoving}
+        onRemoved={onClose}
+      />
     </Dialog>
   );
 }

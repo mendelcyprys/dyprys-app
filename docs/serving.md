@@ -26,10 +26,15 @@ GET    /api/ollama                            what the local ollama server has
 GET    /api/libraries                         every registered library
 POST   /api/libraries                         name a directory on this machine
 DELETE /api/libraries/{name}                  forget a name; files untouched
+DELETE /api/libraries/{name}/index?confirm=   erase the index; the text stays
 POST   /api/libraries/{name}/default          which library a bare `dyp` means
 GET    /api/libraries/{name}/status           totals, coverage, the notes path
 GET    /api/libraries/{name}/check?deep=      what drifted, what is outstanding
 GET    /api/libraries/{name}/books?pattern=   what is in the library
+POST   /api/libraries/{name}/books/describe   name a book, note what it is
+POST   /api/libraries/{name}/books/aside      out of every search, or back in
+POST   /api/libraries/{name}/books/remove?    forget books; confirm to act
+GET    /api/libraries/{name}/shelves          the directories those books sit in
 GET    /api/libraries/{name}/models           what embedded it, how far
 GET    /api/libraries/{name}/models/available the .gguf files on this machine
 GET    /api/libraries/{name}/defaults         what this library remembers
@@ -53,6 +58,52 @@ literally: one builder in `dyprys.service` feeds both frontends, and
 `tests/test_api.py::test_the_api_returns_what_the_cli_prints_for_json` compares
 them. So `docs/maintenance.md` and CLAUDE.md's `--json` notes describe these
 responses too, and there is nothing extra to learn.
+
+## Taking books out of a library
+
+Three levels, two settings each, and the difference between the settings is
+whether the embedding survives. Only the reversible one acts on a single call.
+
+| | reversible | for good |
+|---|---|---|
+| book / shelf | `POST /books/aside` `{keys \| shelf, aside}` | `POST /books/remove` `{keys \| shelf, confirm}` |
+| library | `DELETE /libraries/{name}` | `DELETE /libraries/{name}/index?confirm=true` |
+
+**Addressed exactly, never by pattern.** `keys` are whole book keys and `shelf`
+is a whole directory — `-c` is fuzzy because a search that ranks the wrong book
+costs a second look, and this does not. A client that means "everything matching
+`*Atlas*`" resolves it against `GET /books` first, which also means the list it
+acted on is the list it showed.
+
+**`/books/aside` needs no confirmation** because it deletes nothing: every
+vector, passage and BM25 row stays, no search reads them, and the inverse is the
+same call with `aside: false`. `GET /books` still lists a set-aside book, with a
+non-null `set_aside` timestamp — one nothing shows is one nobody can put back.
+
+**The two irreversible routes preview first.** Without `confirm` they change
+nothing and return exactly what they would take: a book count and chunk count
+for `/books/remove`, and for `/index` the file count, the bytes, and `sources` —
+where the text lives, which is **not** touched. Both previews are built by the
+same service functions the terminal prints from, so a browser and a terminal
+cannot describe the same irreversible act differently.
+
+`DELETE /libraries/{name}/index` deliberately had no route for a while, on the
+grounds that a browser is the wrong place to confirm days of embedding away. The
+preview is that confirmation; what a browser must not have is a single unguarded
+call, and it does not.
+
+## Shelves
+
+`GET /shelves` returns `{shelves: [...], root}`. A shelf is a directory of
+books, derived from the book keys rather than stored, so it cannot disagree with
+the filesystem — and `root` is what each `path` is relative to, which a client
+needs because a relative path alone is not a location. `directory` is the
+absolute one, and it is what identifies a shelf and what `collection` matches.
+
+A book is on exactly one shelf: `papers` and `papers/old` are two shelves, not a
+parent and a child. `GET /books` carries each book's `shelf` rather than leaving
+a client to slice it off `key`, because the split point is a property of the
+whole library and a filtered page cannot compute it.
 
 ## Naming a library
 
@@ -103,6 +154,17 @@ because the name has stopped meaning that directory.
 
 An option this dataclass does not name is a 400 that lists the ones it does,
 rather than being ignored — a silently dropped `k` is worse than a refusal.
+
+**`route` is its own axis, not a step of an effort setting.** It decides which
+books stage 2 reads; `expand` rewrites the query and `rerank` reorders what came
+back. They compose — `_pipeline` takes the router and the reranker as separate
+arguments, and `eval` runs a routed rerank deliberately — and the only measured
+exclusion in this system is `expand` against `rerank`. A client that treats
+routing as one option in a list of three makes the largest speedup unreachable
+whenever a better ranking is also wanted, which is precisely the case on a large
+library. Routing with no profile is a 400 (`no_routing_profile`), not a quiet
+flat search, so ask `GET /models` for `routing.profiled_books` before offering
+it.
 
 **`expand` and `summarise` are `bool | str`.** `true` means "whatever this
 library remembers", a string names a model. That is exactly what argparse's

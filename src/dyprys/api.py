@@ -281,14 +281,34 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
 
     @app.delete("/api/libraries/{name}")
     async def forget(name: str):
-        """Forget a name. Nothing on disk is touched.
+        """Forget a name. Nothing on disk is touched, so nothing is confirmed.
 
-        The CLI's `--delete` — which erases the index directory — deliberately
-        has no route. Over HTTP that is one misclick from days of embedding,
-        and a terminal is the right place to confirm it.
+        Reversible by `dyp library add` with the same path, which is why this
+        needs no ceremony. The irreversible one is a different URL below.
         """
         payload = service.forget_library(name)
         indexes.forget(name)
+        return _json(payload)
+
+    @app.delete("/api/libraries/{name}/index")
+    async def delete_index(name: str, confirm: bool = False):
+        """Erase a library's index directory. **The source text is not touched.**
+
+        Its own route rather than a flag on the one above, and unconfirmed by
+        default, because this is the one button here that can cost days of
+        embedding and nothing brings it back. Without `confirm` it deletes
+        nothing and returns what it would delete — file count, bytes, and where
+        the text lives — so a client can show the difference between the
+        vectors, which go, and the books, which stay.
+
+        This used to have no route at all on the grounds that a browser is the
+        wrong place to confirm it. The preview *is* that confirmation, built
+        from the same function the terminal prints from; what a browser must not
+        have is a single unguarded call, and it does not.
+        """
+        payload = service.delete_library(name, confirm=confirm)
+        if payload["deleted"]:
+            indexes.forget(name)
         return _json(payload)
 
     @app.post("/api/libraries/{name}/default")
@@ -327,6 +347,59 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
         given = {field: body[field] for field in ("label", "note") if field in body}
         return _json(await indexes.run(
             name, lambda s: service.describe_book(s.conn, body.get("key", ""), **given)))
+
+    @app.get("/api/libraries/{name}/shelves")
+    async def shelves(name: str):
+        """The level between a library and a book.
+
+        Derived from where the text sits rather than stored, so it cannot
+        disagree with the filesystem — see `library.shelves`.
+        """
+        return _json(await indexes.run(name, lambda s: service.shelves_payload(s.conn)))
+
+    def _named(session, body):
+        """The books a request means, by exact key or by whole shelf."""
+        keys, shelf = body.get("keys"), body.get("shelf")
+        if keys is not None and not isinstance(keys, list):
+            raise errors.BadRequest("keys must be a list of book keys")
+        return service.books_named(session.conn, keys=keys, shelf=shelf)
+
+    @app.post("/api/libraries/{name}/books/aside")
+    async def set_aside(name: str, body: dict = Body(default_factory=dict)):
+        """Take books out of every search, or put them back. Nothing is deleted.
+
+        This one *is* offered over HTTP without a confirmation step, unlike the
+        two below, because it is the only removal here that costs nothing to
+        undo: the vectors stay, and the inverse call is the same call with
+        `aside: false`.
+        """
+        unknown = set(body) - {"keys", "shelf", "aside"}
+        if unknown:
+            raise errors.BadRequest(
+                f"unknown field(s): {', '.join(sorted(unknown))}. "
+                f"Setting books aside takes: keys or shelf, and aside.")
+        aside = bool(body.get("aside", True))
+        return _json(await indexes.run(
+            name, lambda s: service.set_books_aside(s.conn, _named(s, body), aside)))
+
+    @app.post("/api/libraries/{name}/books/remove")
+    async def remove_books(name: str, body: dict = Body(default_factory=dict)):
+        """Forget books for good. Their source files are not touched.
+
+        Two steps, the same two `dyp remove` has: without `confirm` this changes
+        nothing and returns exactly what it would do, so the confirmation a
+        person sees is built from the same count that will be acted on rather
+        than from a second query that may disagree.
+        """
+        unknown = set(body) - {"keys", "shelf", "confirm"}
+        if unknown:
+            raise errors.BadRequest(
+                f"unknown field(s): {', '.join(sorted(unknown))}. "
+                f"Removing books takes: keys or shelf, and confirm.")
+        confirm = bool(body.get("confirm", False))
+        return _json(await indexes.run(
+            name,
+            lambda s: service.drop_books(s.conn, _named(s, body), confirm=confirm)))
 
     @app.get("/api/libraries/{name}/models")
     async def models(name: str):

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { FileQuestion, Settings2, Star, Zap } from "lucide-react";
+import { Compass, FileQuestion, FileText, Settings2, Star, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -11,40 +11,33 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ModelChoice } from "@/components/model-choice";
-import type { WeightsFile } from "@/lib/api";
-import { useAvailableModels, useDefaults, useOllama, useRemember } from "@/lib/queries";
-import { useSearchSettings, type Effort } from "@/lib/settings";
-import { bytes, cn } from "@/lib/utils";
-
-const EFFORT: { value: Effort; label: string; detail: string }[] = [
-  {
-    value: "fast",
-    label: "Fast",
-    detail: "the default: literal-safe, no extra model",
-  },
-  {
-    value: "expand",
-    label: "Expand",
-    detail: "rewrite the query into the library’s words, then search",
-  },
-  {
-    value: "rerank",
-    label: "Rerank",
-    // No figure: the cost is one pass of a cross-encoder per candidate, so it
-    // is set by the depth, the model and the machine rather than by the
-    // feature. Measured here at 25.7s for 20 passages against a 0.6B reranker;
-    // quoting a number the page cannot know is worse than quoting none.
-    detail: "a cross-encoder rescores every candidate — seconds per passage",
-  },
-];
+import type { ModelRow, WeightsFile } from "@/lib/api";
+import { useAvailableModels, useDefaults, useModels, useOllama, useRemember } from "@/lib/queries";
+import { EFFORTS, useSearchSettings } from "@/lib/settings";
+import { bytes, cn, count } from "@/lib/utils";
 
 /**
- * The choices the index cannot remember for you.
+ * The default a bare `--route` has: `routing.DEFAULT_BOOKS`.
  *
- * A reranker is a path to a cross-encoder GGUF, must be passed on every search,
- * and bare `rerank` errors rather than silently returning unreranked results.
- * So it is chosen here, from what is actually on the machine, and kept per
- * library in this browser.
+ * Spelled here rather than fetched, exactly as `cli.py` spells the rerank
+ * default rather than importing it, and pinned by a test for the same reason —
+ * the two drifting apart would mean the browser and a terminal quietly ran
+ * different searches under the same name.
+ */
+const DEFAULT_ROUTE = 5;
+
+/**
+ * The choices the index cannot remember for you, in the order a search makes
+ * them.
+ *
+ * Three sections, three questions, and each one is a separate axis: **where to
+ * look** (routing narrows the books stage 2 reads), **how hard to look**
+ * (expansion rewrites the query, reranking reorders what came back), **what
+ * comes back** (passages, or drafted prose). Only the middle one is a choice of
+ * one — expansion and reranking are measured substitutes. Routing composes with
+ * either, and the model each option needs is nested under the option itself so
+ * that picking a reranker and never reranking is not something this sheet lets
+ * you do by accident.
  */
 export function SettingsSheet({ library }: { library: string }) {
   const [open, setOpen] = React.useState(false);
@@ -53,44 +46,60 @@ export function SettingsSheet({ library }: { library: string }) {
   const ollama = useOllama(open);
   const defaults = useDefaults(library);
   const remember = useRemember(library);
+  const models = useModels(library);
+
+  // Which model's routing profile is the relevant one. Mirrors the picker: an
+  // index with exactly one model needs no choice, so `settings.model` is null
+  // there and the single row is still the one that will answer.
+  const rows = models.data?.models ?? [];
+  const chosen =
+    rows.find((row) => row.name === settings.model) ?? (rows.length === 1 ? rows[0] : undefined);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm" className="w-full justify-start">
           <Settings2 /> Search settings
-          {settings.effort !== "fast" && (
-            <Badge variant="outline" className="ml-auto">
-              {settings.effort}
-            </Badge>
-          )}
+          <span className="ml-auto flex gap-1">
+            {settings.route > 0 && <Badge variant="outline">routed</Badge>}
+            {settings.effort !== "fast" && <Badge variant="outline">{settings.effort}</Badge>}
+          </span>
         </Button>
       </DialogTrigger>
 
       <DialogContent side="right" className="flex flex-col gap-0 overflow-hidden">
         <DialogTitle>Search settings — {library}</DialogTitle>
         <DialogDescription>
-          Kept in this browser, for this library. Everything else a search needs, the index already
-          remembers.
+          Kept in this browser, for this library. Three independent choices: which books get read,
+          how hard the search works, and what comes back.
         </DialogDescription>
 
         <div className="mt-6 flex-1 space-y-8 overflow-y-auto pr-2">
+          <Routing
+            route={settings.route}
+            onRoute={(books) => update({ route: books })}
+            model={chosen}
+            loading={models.isLoading}
+            unchosen={rows.length > 1 && !settings.model}
+          />
+
           <section className="space-y-3">
             <div>
               <h3 className="flex items-center gap-2 text-sm font-medium">
-                <Zap className="size-3.5" /> Effort
+                <Zap className="size-3.5" /> How hard to look
               </h3>
               {/* One control, not two checkboxes. Measured, expansion and
                   reranking are substitutes: together they recover the same
                   answers as the better one alone, at the sum of the costs. */}
               <p className="mt-1 text-xs text-muted-foreground">
                 Expanding and reranking are substitutes, not complements — together they cost both
-                and find what the better one finds alone. So this is a choice of one.
+                and find what the better one finds alone. So this is a choice of one. Either
+                composes with routing above.
               </p>
             </div>
 
             <div className="flex gap-1 rounded-lg border p-1">
-              {EFFORT.map((option) => (
+              {EFFORTS.map((option) => (
                 <button
                   key={option.value}
                   onClick={() => update({ effort: option.value })}
@@ -106,68 +115,105 @@ export function SettingsSheet({ library }: { library: string }) {
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {EFFORT.find((option) => option.value === settings.effort)?.detail}
+              {EFFORTS.find((option) => option.value === settings.effort)?.detail}
             </p>
 
-            {settings.effort === "rerank" && (
-              <div className="space-y-1.5 rounded-md border p-3">
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs font-medium">Depth</span>
-                  <span className="tabular-nums text-xs text-muted-foreground">
-                    {settings.depth} candidates
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={3}
-                  max={40}
-                  step={1}
-                  value={settings.depth}
-                  onChange={(event) => update({ depth: Number(event.target.value) })}
-                  className="w-full accent-[hsl(var(--primary))]"
+            {/* The model each option needs, under the option that needs it. A
+                reranker chosen while Effort is Expand is a setting that does
+                nothing, and the old sheet offered both at once. */}
+            {settings.effort === "expand" && (
+              <div className="space-y-2 rounded-md border p-3">
+                <h4 className="text-xs font-medium">Expander</h4>
+                <ModelChoice
+                  installed={ollama.data?.models ?? []}
+                  chosen={settings.expander}
+                  remembered={defaults.data?.defaults.expander ?? null}
+                  onChoose={(model) => update({ expander: model })}
+                  onRemember={(model) => remember.mutate({ role: "expander", model })}
+                  busy={remember.isPending}
+                  empty={
+                    <>
+                      Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
+                      <code className="font-mono">ollama serve</code>, or name a model anyway.
+                    </>
+                  }
                 />
-                {/* The one number that sets what reranking costs: it is a model
-                    pass per candidate, so the time is linear in this. Measured
-                    against a 0.6B cross-encoder, retrieval alone being 0.2s. */}
+                {!settings.expander && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Nothing picked, so the library’s own default is used —{" "}
+                    {defaults.data?.defaults.expander
+                      ? `currently ${defaults.data.defaults.expander}.`
+                      : "and there is none, so a search will refuse rather than guess."}
+                  </p>
+                )}
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  One model pass each, so the wait is roughly linear in this — about 7.7s at 5 and
-                  25.7s at 20 on a 0.6B cross-encoder. Reranking cannot find what the search missed;
-                  a deeper shortlist is the only thing that can, and it is also the only thing that
-                  costs.
+                  Do not expand when the answer is a rare literal — a name, a place, an odd
+                  spelling. It bridges vocabulary, and a rare token has none to bridge.
                 </p>
+              </div>
+            )}
+
+            {settings.effort === "rerank" && (
+              <div className="space-y-4 rounded-md border p-3">
+                <div className="space-y-1.5">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs font-medium">Depth</span>
+                    <span className="tabular-nums text-xs text-muted-foreground">
+                      {count(settings.depth, "candidate")}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={3}
+                    max={40}
+                    step={1}
+                    value={settings.depth}
+                    onChange={(event) => update({ depth: Number(event.target.value) })}
+                    className="w-full accent-[hsl(var(--primary))]"
+                  />
+                  {/* The one number that sets what reranking costs: it is a model
+                      pass per candidate, so the time is linear in this. Measured
+                      against a 0.6B cross-encoder, retrieval alone being 0.2s. */}
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    One model pass each, so the wait is roughly linear in this — about 7.7s at 5 and
+                    25.7s at 20 on a 0.6B cross-encoder. Reranking cannot find what the search
+                    missed; a deeper shortlist is the only thing that can, and it is also the only
+                    thing that costs.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <h4 className="text-xs font-medium">Reranker</h4>
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    A cross-encoder <code className="font-mono">.gguf</code>, not a chat model. The
+                    index does not remember this one unless you star it, so it is sent with every
+                    search — and asking to rerank without it is an error rather than a quiet
+                    downgrade.
+                  </p>
+                  <Weights
+                    chosen={settings.reranker}
+                    remembered={defaults.data?.defaults.reranker ?? null}
+                    onChoose={(path) => update({ reranker: path })}
+                    onRemember={(path) => remember.mutate({ role: "reranker", model: path })}
+                    busy={remember.isPending}
+                    files={weights.data?.models}
+                    searched={weights.data?.searched}
+                    loading={weights.isLoading}
+                  />
+                </div>
               </div>
             )}
           </section>
 
           <section className="space-y-3">
-            <div>
-              <h3 className="text-sm font-medium">Reranker</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                A cross-encoder <code className="font-mono">.gguf</code>, not a chat model. The
-                index does not remember this one, so it is sent with every search — and asking to
-                rerank without it is an error rather than a quiet downgrade.
-              </p>
-            </div>
-
-            <Weights
-              chosen={settings.reranker}
-              remembered={defaults.data?.defaults.reranker ?? null}
-              onChoose={(path) => update({ reranker: path })}
-              onRemember={(path) => remember.mutate({ role: "reranker", model: path })}
-              busy={remember.isPending}
-              files={weights.data?.models}
-              searched={weights.data?.searched}
-              loading={weights.isLoading}
-            />
-          </section>
-
-          <section className="space-y-3">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-sm font-medium">Draft an answer</h3>
+                <h3 className="flex items-center gap-2 text-sm font-medium">
+                  <FileText className="size-3.5" /> What comes back
+                </h3>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Prose instead of passages, with every quotation checked against the text it cites.
-                  It costs seconds, and the passages are the result either way — so it is a switch
+                  Passages either way. Turn this on to also draft prose from them, with every
+                  quotation checked against the text it cites — it costs seconds, so it is a switch
                   rather than something left on.
                 </p>
               </div>
@@ -175,6 +221,7 @@ export function SettingsSheet({ library }: { library: string }) {
                 type="button"
                 role="switch"
                 aria-checked={settings.summarise}
+                aria-label="Draft an answer"
                 onClick={() => update({ summarise: !settings.summarise })}
                 className={cn(
                   "mt-1 flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
@@ -191,64 +238,170 @@ export function SettingsSheet({ library }: { library: string }) {
             </div>
 
             {settings.summarise && (
-              <ModelChoice
-                installed={ollama.data?.models ?? []}
-                chosen={settings.summariser}
-                remembered={defaults.data?.defaults.summariser ?? null}
-                onChoose={(model) => update({ summariser: model })}
-                onRemember={(model) => remember.mutate({ role: "summariser", model })}
-                busy={remember.isPending}
-                empty={
-                  <>
-                    Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
-                    <code className="font-mono">ollama serve</code>, or name a model anyway.
-                  </>
-                }
-              />
-            )}
-            {settings.summarise && !settings.summariser && (
-              <p className="text-[11px] text-muted-foreground">
-                Nothing picked, so the library’s own default is used — starred here, and{" "}
-                {defaults.data?.defaults.summariser
-                  ? `currently ${defaults.data.defaults.summariser}.`
-                  : "there is none, so a search will refuse rather than guess."}
-              </p>
+              <div className="space-y-2 rounded-md border p-3">
+                <h4 className="text-xs font-medium">Summariser</h4>
+                <ModelChoice
+                  installed={ollama.data?.models ?? []}
+                  chosen={settings.summariser}
+                  remembered={defaults.data?.defaults.summariser ?? null}
+                  onChoose={(model) => update({ summariser: model })}
+                  onRemember={(model) => remember.mutate({ role: "summariser", model })}
+                  busy={remember.isPending}
+                  empty={
+                    <>
+                      Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
+                      <code className="font-mono">ollama serve</code>, or name a model anyway.
+                    </>
+                  }
+                />
+                {!settings.summariser && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Nothing picked, so the library’s own default is used — starred here, and{" "}
+                    {defaults.data?.defaults.summariser
+                      ? `currently ${defaults.data.defaults.summariser}.`
+                      : "there is none, so a search will refuse rather than guess."}
+                  </p>
+                )}
+              </div>
             )}
           </section>
 
-          <section className="space-y-3">
-            <div>
-              <h3 className="text-sm font-medium">Expander</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Used only when Effort is set to Expand. Pick nothing and the library’s own default
-                is used.
-              </p>
-            </div>
-            <ModelChoice
-              installed={ollama.data?.models ?? []}
-              chosen={settings.expander}
-              remembered={defaults.data?.defaults.expander ?? null}
-              onChoose={(model) => update({ expander: model })}
-              onRemember={(model) => remember.mutate({ role: "expander", model })}
-              busy={remember.isPending}
-              empty={
-                <>
-                  Nothing found at {ollama.data?.host ?? "the ollama server"}. Start{" "}
-                  <code className="font-mono">ollama serve</code>, or name a model anyway.
-                </>
-              }
-            />
-            {remember.error && (
-              <p className="text-xs text-destructive">{(remember.error as Error).message}</p>
-            )}
-            <p className="text-[11px] text-muted-foreground">
-              The star writes into the index, so a default set here is the one a terminal reads too.
-              Picking is just this browser, for the next search.
-            </p>
-          </section>
+          {remember.error && (
+            <p className="text-xs text-destructive">{(remember.error as Error).message}</p>
+          )}
+          <p className="border-t pt-4 text-[11px] text-muted-foreground">
+            The star writes into the index, so a default set here is the one a terminal reads too.
+            Picking is just this browser, for the next search.
+          </p>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Which books stage 2 reads — the axis this sheet had no control for at all.
+ *
+ * `--route` is the largest speedup the tool has (~6x, reading about 1% of the
+ * library) at a cost of roughly one answer in twenty-five, and it is orthogonal
+ * to everything below it: the eval harness runs a routed rerank on purpose. The
+ * browser never sent `route`, so every search from here read the whole library,
+ * on a 3,000-book index as readily as a 20-book one.
+ *
+ * It is offered only when the chosen model has a profile, because a search
+ * asked to route without one is a refusal and not a fallback — better said with
+ * the switch than in a red box after the question.
+ */
+function Routing({
+  route,
+  onRoute,
+  model,
+  loading,
+  unchosen,
+}: {
+  route: number;
+  onRoute: (books: number) => void;
+  model: ModelRow | undefined;
+  loading: boolean;
+  unchosen: boolean;
+}) {
+  const profiled = model?.routing.profiled_books ?? 0;
+  // Only a profiled model can route. Unknown is not the same as none: with no
+  // model chosen on a multi-model index there is nothing to read this off, and
+  // the search would refuse on the model long before it refused on routing.
+  const unavailable = Boolean(model) && profiled === 0;
+  const on = route > 0;
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-medium">
+            <Compass className="size-3.5" /> Where to look
+          </h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Routing scores every book first and searches only the best few — about six times faster,
+            reading around 1% of the library, at a cost of roughly one answer in twenty-five. Its
+            own choice: it composes with everything below.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label="Route to the best books"
+          disabled={unavailable || loading}
+          onClick={() => onRoute(on ? 0 : DEFAULT_ROUTE)}
+          className={cn(
+            "mt-1 flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+            on ? "border-primary bg-primary" : "border-input bg-muted",
+            (unavailable || loading) && "cursor-not-allowed opacity-40",
+          )}
+        >
+          <span
+            className={cn(
+              "block size-3.5 rounded-full bg-background transition-transform",
+              on ? "translate-x-[1.15rem]" : "translate-x-[0.15rem]",
+            )}
+          />
+        </button>
+      </div>
+
+      {unavailable && (
+        <p className="rounded-md border border-dashed p-3 text-[11px] leading-relaxed text-muted-foreground">
+          This model has no routing profile, and a search asked to route without one is refused
+          rather than quietly run flat. Build it under{" "}
+          <strong className="font-medium">Jobs → Run route</strong>; it reads the vectors already on
+          disk and embeds nothing.
+        </p>
+      )}
+
+      {unchosen && !on && (
+        <p className="text-[11px] text-muted-foreground">
+          Choose a model in the rail to see whether it can route — the profile belongs to the model,
+          not the library.
+        </p>
+      )}
+
+      {on && (
+        <div className="space-y-1.5 rounded-md border p-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs font-medium">Books read</span>
+            <span className="tabular-nums text-xs text-muted-foreground">
+              {/* "5 of 0" is what this said before a model was chosen, which
+                  reads as broken rather than as unknown. The profile belongs to
+                  a model, so with none picked there is no denominator to give. */}
+              {model ? `${route} of ${profiled.toLocaleString()}` : count(route, "book")}
+            </span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={50}
+            step={1}
+            value={route}
+            onChange={(event) => onRoute(Number(event.target.value))}
+            className="w-full accent-[hsl(var(--primary))]"
+          />
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Stage 2 costs what this says, not what the library holds — which is the whole point on a
+            large one. Narrower is faster and misses more: when a result is the wrong book but a
+            plausible passage, widen this or turn routing off and ask again.
+          </p>
+          {(model?.routing.stale_books ?? 0) > 0 && (
+            // The one failure invisible from the output: an unprofiled book
+            // cannot be returned at *any* rank, and the search still comes back
+            // with a full k at 200. It also arrives as a warning on the result,
+            // but by then the search has already been run without it.
+            <p className="text-[11px] leading-snug text-amber-500">
+              {count(model!.routing.stale_books, "book")} embedded or changed since the profile was
+              built. Routing cannot return {model!.routing.stale_books === 1 ? "it" : "them"} at any
+              rank, and the search will not look short — run route again under Jobs.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

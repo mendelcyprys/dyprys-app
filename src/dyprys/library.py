@@ -169,6 +169,15 @@ class BookInfo:
     # `title` stays what ingest derived; see the schema comment on `books`.
     label: str | None = None
     note: str | None = None
+    # When this book was set aside, or None while it is part of the library.
+    # A set-aside book keeps every vector it has and is returned by no search;
+    # see the schema comment on `books.excluded_at`.
+    set_aside: str | None = None
+    # Which shelf it sits on: its directory, relative to the root every book in
+    # this library shares. "" is the root itself. Computed against *every* book
+    # rather than the ones a pattern kept, so filtering the list cannot move the
+    # split point and rename every shelf on screen.
+    shelf: str = ""
     sources: list[SourceInfo] = field(default_factory=list)
     chunkings: list[ChunkingInfo] = field(default_factory=list)
     lexical: int = 0
@@ -194,6 +203,35 @@ class BookInfo:
         return sum(c.chunks for c in self.chunkings if c.id == chunking)
 
 
+def _root(keys: list[str]) -> str:
+    """The deepest directory every book sits under.
+
+    Not the library's registered path: that is where the *index* lives, and on
+    two of the three real libraries here it is not where the text is (`neuro`
+    indexes at `neuro/index` and reads from `neuro/cyprys_scale_texts`). The
+    books themselves are the only thing that knows.
+    """
+    if not keys:
+        return ""
+    parts = [Path(k).parent.parts for k in keys]
+    shared: list[str] = []
+    for segments in zip(*parts):
+        if len(set(segments)) != 1:
+            break
+        shared.append(segments[0])
+    return str(Path(*shared)) if shared else ""
+
+
+def _shelf_of(key: str, root: str) -> str:
+    """A book's directory, said relative to the root. "" is the root itself."""
+    directory = Path(key).parent
+    try:
+        relative = str(directory.relative_to(root)) if root else str(directory)
+    except ValueError:
+        relative = str(directory)
+    return "" if relative == "." else relative
+
+
 def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo]:
     """Every book, or those matching `pattern`, with what covers it."""
     from dyprys.search import scope_books
@@ -206,14 +244,20 @@ def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo
     # it joined the whole 284,627-row FTS index against segments on a *range*
     # and no index can serve that. 3,453 x 284,627 is a billion comparisons.
     rows = conn.execute(
-        "SELECT id, title, key, label, note FROM books "
+        "SELECT id, title, key, label, note, excluded_at FROM books "
         # By the name a person actually sees, so a labelled book sorts where
         # they will look for it rather than where its filename put it.
         "ORDER BY COALESCE(label, title)").fetchall()
     keep = [r for r in rows if wanted is None or r["id"] in wanted]
     ids = {r["id"] for r in keep}
+    # From every row, not from `keep`: the shared root is a property of the
+    # library, and deriving it from a filtered list would make `dyp books
+    # Talmud` report a different shelf for the same book than `dyp books` does.
+    root = _root([r["key"] for r in rows])
     books_by_id = {r["id"]: BookInfo(id=r["id"], title=r["title"], key=r["key"],
-                                     label=r["label"], note=r["note"])
+                                     label=r["label"], note=r["note"],
+                                     set_aside=r["excluded_at"],
+                                     shelf=_shelf_of(r["key"], root))
                    for r in keep}
 
     for src in conn.execute(
@@ -269,6 +313,76 @@ def books(conn: sqlite3.Connection, pattern: str | None = None) -> list[BookInfo
         ).fetchone()[0]
 
     return [books_by_id[r["id"]] for r in keep]
+
+
+@dataclass
+class ShelfInfo:
+    """A directory of books, which is the level between a library and a book.
+
+    Not a table. A shelf is where the text actually sits, derived from the book
+    keys the way a reader already thinks about them -- `dyp add ~/texts/papers`
+    made a shelf whether or not anything recorded it, and `-c papers/` has always
+    searched one. Storing it would mean a second name for the same fact, free to
+    disagree with the filesystem the moment anything moved.
+    """
+
+    #: Path relative to the root every book in this library shares. "" is the
+    #: root itself -- books added straight from the library directory.
+    path: str
+    #: The absolute directory, which is what `-c` matches and what identifies it.
+    directory: str
+    books: int = 0
+    #: How many of those are set aside. `books` counts them; searches do not.
+    set_aside: int = 0
+    chunks: int = 0
+    bytes: int = 0
+    #: model name -> chunks embedded, and the divisor that goes with it.
+    embedded: dict[str, int] = field(default_factory=dict)
+    live_chunks: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def name(self) -> str:
+        """What to call it: the last segment, or the root directory's own name."""
+        return self.path.rsplit("/", 1)[-1] if self.path else Path(self.directory).name
+
+
+def text_root(conn: sqlite3.Connection) -> str:
+    """The directory every book in this library sits under.
+
+    What shelf paths are relative to, and not the same thing as the registered
+    library path -- that is where the index lives, which on a real library is
+    often a sibling of the text rather than its parent.
+    """
+    return _root([r["key"] for r in conn.execute("SELECT key FROM books")])
+
+
+def shelves(conn: sqlite3.Connection) -> list[ShelfInfo]:
+    """Every shelf, with what is on it.
+
+    A book belongs to exactly one shelf -- the directory holding it -- so this is
+    a partition and not a tree. `cyprys_scale_texts` and
+    `cyprys_scale_texts/gutenberg` are two shelves, not a parent and a child:
+    1,679 books sit directly in the first and 1,657 in the second, and counting
+    the second inside the first would make "set this shelf aside" mean two
+    different things depending on which row was clicked. The nesting is still
+    legible, because the path is the name.
+    """
+    by_path: dict[str, ShelfInfo] = {}
+
+    for book in books(conn):
+        shelf = by_path.get(book.shelf)
+        if shelf is None:
+            shelf = by_path[book.shelf] = ShelfInfo(
+                path=book.shelf, directory=str(Path(book.key).parent))
+        shelf.books += 1
+        shelf.set_aside += bool(book.set_aside)
+        shelf.chunks += book.chunks
+        shelf.bytes += sum(s.size_bytes for s in book.sources)
+        for model, done in book.per_model.items():
+            shelf.embedded[model] = shelf.embedded.get(model, 0) + done
+            shelf.live_chunks[model] = shelf.live_chunks.get(model, 0) + book.live_for(model)
+
+    return sorted(by_path.values(), key=lambda s: s.path)
 
 
 def chunkings(conn: sqlite3.Connection) -> list[ChunkingInfo]:

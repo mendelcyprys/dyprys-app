@@ -13,9 +13,51 @@ import * as React from "react";
  * `--expand` and `--rerank` are substitutes: together they recover the same
  * answers as the better one alone, at the sum of the costs. A UI with two
  * checkboxes invites the combination that is strictly worse.
+ *
+ * `route` is deliberately *not* part of `effort`, and the two must not be
+ * folded together. Routing decides which books stage 2 reads; effort decides
+ * how the query is written and how the results are ordered. They compose --
+ * `eval` runs a routed rerank on purpose -- and the only measured exclusion in
+ * this system is expand against rerank. Folding routing into the same control
+ * would make the library's biggest speedup unreachable whenever someone wanted
+ * a better ranking, which is precisely when a large library needs both.
  */
 
 export type Effort = "fast" | "expand" | "rerank";
+
+/**
+ * The three efforts, with the words the UI uses for them — defined once so the
+ * sheet that sets one and the badge that reports it cannot say different
+ * things. `"fast"` is the stored value and stays that way (it is in everyone's
+ * localStorage); *"Plain"* is what it is called now, because routing is the
+ * speed control and two things claiming that name is what made routing hard to
+ * find.
+ */
+export const EFFORTS: { value: Effort; label: string; detail: string }[] = [
+  {
+    value: "fast",
+    label: "Plain",
+    detail: "the default: the query as you typed it, literal-safe, no extra model",
+  },
+  {
+    value: "expand",
+    label: "Expand",
+    detail: "rewrite the query into the library\u2019s words, then search \u2014 a few seconds",
+  },
+  {
+    value: "rerank",
+    label: "Rerank",
+    // No figure: the cost is one pass of a cross-encoder per candidate, so it
+    // is set by the depth, the model and the machine rather than by the
+    // feature. Measured here at 25.7s for 20 passages against a 0.6B reranker;
+    // quoting a number the page cannot know is worse than quoting none.
+    detail: "a cross-encoder rescores every candidate \u2014 seconds per passage",
+  },
+];
+
+/** What to call an effort in a badge. */
+export const effortLabel = (effort: Effort) =>
+  EFFORTS.find((option) => option.value === effort)?.label ?? effort;
 
 export interface Settings {
   model: string | null;
@@ -23,6 +65,15 @@ export interface Settings {
   expander: string | null;
   /** How many candidates the cross-encoder rescores. The price of reranking. */
   depth: number;
+  /**
+   * Books stage 1 narrows to, or 0 for the whole library.
+   *
+   * Its own axis, not a step of `effort`: see the note above. Needs a routing
+   * profile, and a search asked to route without one is a refusal, not a
+   * fallback -- so the sheet reads the model's `routing.profiled_books` before
+   * offering it.
+   */
+  route: number;
   /** Draft prose from the passages. Off by default: it costs seconds. */
   summarise: boolean;
   /** Which model drafts it. Null means whatever the library remembers. */
@@ -37,6 +88,9 @@ const EMPTY: Settings = {
   // The same default a bare `--rerank` has. It was 20 here, which is twice the
   // cost of the documented default and nothing said so.
   depth: 10,
+  // Off, like `dyp ask` with no `--route`. It costs about one answer in
+  // twenty-five, which is not a price to charge anybody by default.
+  route: 0,
   summarise: false,
   summariser: null,
   effort: "fast",

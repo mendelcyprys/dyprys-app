@@ -26,21 +26,69 @@ registered but not mounted, which one is the default), naming and forgetting a
 library, and `NOTES.md` rendered, with a one-line nudge on the first search of a
 session because notes only help when read *before* searching.
 
-**Books** — virtualised (3,453 in `neuro`), filtered on the server through the
-same matcher `-c` uses, per-model coverage, missing source files called out.
-Checkboxes feed the rail's scope, and a selected book contributes its **path**:
-titles collide, and sefaria holds two books called `Arakhin`.
+**Books** — a library holds shelves; a shelf holds books. The middle level was
+always there (`-c papers/` has always meant one shelf, `dyp embed -c` fills one at
+a time) and only the flat list did not show it: `neuro` was 3,453 rows with no
+structure, and is now three — 1,679 scanned texts, 1,657 Gutenberg books, 117
+extracted neuroscience PDFs. Which of the three a question belongs to is the most
+useful thing about that library, and it was invisible.
+
+Shelf headers and books are **one** flat virtualised list of two row kinds
+rather than a list of lists, so a shelf of 1,657 books costs what one of three
+costs. Shelves start folded above 60 books and always open while filtering,
+because the filter is the thing being looked at. A header's counts stay the
+library's, with a `5 of 117` prefix when a filter is narrowing what is under it —
+a header that shrank with the filter would say the Talmud shelf holds two books
+because two of them matched.
+
+A shelf enters the scope as **one pattern**, its directory: that is what a
+terminal would write, it survives books being added to the shelf, and it is one
+chip in the rail rather than 1,657. A selected *book* still contributes its
+**path**, because titles collide and sefaria holds two books called `Arakhin`.
+
+**Removing things** has two settings at every level, and which one a control gets
+follows from whether the embedding survives. **Set aside** is a plain button —
+every vector, passage and BM25 row stays, no search reads them, one click back —
+and it is what to reach for when a book's extraction lost its word boundaries or
+a shelf swamps every answer. **Remove** and **delete the index** are previewed by
+the server and then typed to confirm, because they are not recoverable. No source
+text is deleted by any of them, and the index-deletion dialog says where the text
+lives so that is checkable rather than a promise.
 
 **Models** — a picker that is required on a multi-model index and warms on
 selection, `model_ambiguous` rendered as the picker that resolves it, weights
 that have gone missing said before the question rather than as a 503 during it,
-and a settings sheet holding the reranker per library.
+and a settings sheet holding the per-library choices the index cannot remember.
 
 **Ask and the reader** — the streamed search, the drafted answer with its quotes
 checked, and `GET /source` as a window around a passage. Stopping a search
 really stops it: the server is told when the stream closes, and the search gives
 up at its next checkpoint rather than holding the library's one worker thread
 while the next question queues behind a closed tab.
+
+**Search settings** — three sections, because a search makes three independent
+choices and the sheet had been running two of them together. *Where to look*
+is routing; *how hard to look* is the effort control; *what comes back* is the
+drafted answer. Each option carries the model it needs inside it, so a reranker
+cannot be chosen while the search is set to expand.
+
+Routing had no control at all until this: `route` was declared on the browser's
+`SearchBody` and never sent, so every search from the browser read the whole
+library — on `neuro`'s 3,453 books as readily as on a 20-book one. It is the
+tool's largest speedup (~6x, about 1% of the library read) for roughly one
+answer in twenty-five, and it composes with everything else: `_pipeline` takes
+the router and the reranker as separate arguments, and `eval` runs a routed
+rerank on purpose. Folding it into the effort control would have made the
+biggest speedup unreachable exactly when a large library also wanted a better
+ranking. It is offered only where the chosen model has a profile, because a
+search asked to route without one is refused rather than quietly run flat —
+better said at the switch than in a red box after the question.
+
+`tests/test_api.py` pins the whole request: every field of `SearchOptions` is
+either in the body `ask.tsx` builds or listed with the reason it is not offered.
+A typed field nobody sends is invisible from both sides — Python saw a valid
+request, TypeScript saw an optional property — and that is how routing stayed
+missing.
 
 Reranking's depth is a slider, because it is the whole cost — one cross-encoder
 pass per candidate. On `neuro` with a 0.6B reranker: retrieval alone is 0.2s,

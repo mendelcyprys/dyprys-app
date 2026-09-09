@@ -91,6 +91,83 @@ export function useDescribeBook(library: string) {
   });
 }
 
+/**
+ * The shelves a library's books sit on.
+ *
+ * Its own query rather than derived from the book list, because the book list
+ * is filtered on the server: a search for "Kandel" would otherwise report that
+ * the library has one shelf with one book on it.
+ */
+export function useShelves(library: string | null) {
+  return useQuery({
+    queryKey: ["shelves", library] as const,
+    queryFn: () => api.shelves(library!),
+    enabled: Boolean(library),
+  });
+}
+
+/**
+ * Taking books out of a library, in the three ways this tool has.
+ *
+ * Grouped because the difference between them is the thing a caller has to keep
+ * straight, and one hook makes that difference visible at the call site:
+ * `aside` is reversible and needs no confirmation, `remove` and `deleteIndex`
+ * both take a `confirm` and are previews without it.
+ */
+export function useRemoval(library: string) {
+  const cache = useQueryClient();
+  // Every count on screen moves when books do: the listing, the shelves, the
+  // library totals in the rail, and `check`, which counts outstanding work.
+  const refresh = () => {
+    for (const key of ["books", "shelves", "status", "check", "models"]) {
+      cache.invalidateQueries({ queryKey: [key, library] });
+    }
+    cache.invalidateQueries({ queryKey: keys.libraries });
+  };
+
+  return {
+    aside: useMutation({
+      mutationFn: ({
+        keys: bookKeys,
+        shelf,
+        aside,
+      }: {
+        keys?: string[];
+        shelf?: string;
+        aside: boolean;
+      }) => api.setAside(library, { keys: bookKeys, shelf }, aside),
+      onSuccess: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: ({
+        keys: bookKeys,
+        shelf,
+        confirm,
+      }: {
+        keys?: string[];
+        shelf?: string;
+        confirm?: boolean;
+      }) => api.removeBooks(library, { keys: bookKeys, shelf }, confirm),
+      // Only when it actually removed something: a preview must not make the
+      // whole screen refetch, which is most of the times this is called.
+      onSuccess: (result) => result.removed && refresh(),
+    }),
+  };
+}
+
+/** Erasing a library's index. Separate from `useRemoval`: it is not per-library
+ *  state but the library itself, and the caller has to stop naming it after. */
+export function useDeleteIndex() {
+  const cache = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, confirm }: { name: string; confirm?: boolean }) =>
+      api.deleteIndex(name, confirm),
+    onSuccess: (result) => {
+      if (result.deleted) cache.invalidateQueries({ queryKey: keys.libraries });
+    },
+  });
+}
+
 export function useModels(library: string | null) {
   return useQuery({
     queryKey: ["models", library] as const,

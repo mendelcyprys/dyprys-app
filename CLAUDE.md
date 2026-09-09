@@ -179,6 +179,23 @@ nothing and losing no vector. Embedding that second chunking then needs a
 command** — `dyp -L NAME ask "…"`, not `dyp ask "…" -L NAME`, which fails with
 `unrecognized arguments`.
 
+**Shelves** — `dyp shelves`. A library holds shelves; a shelf holds books. A
+shelf is the directory the text was added from, derived rather than stored, and
+it is the level `-c` has always cut along: `dyp ask "…" -c papers/` is one shelf.
+`dyp shelves` names them with their sizes, which on a 3,453-book library is
+three lines instead of three thousand — and knowing which of the three a
+question belongs to is usually worth more than any flag below.
+
+**Set a book or a shelf aside** — `dyp books PATTERN --aside`,
+`dyp shelves --aside SHELF` (`--restore` puts them back). This takes them out of
+**every** search while leaving every vector, passage and BM25 row exactly where
+it is: nothing is deleted and putting them back costs one command. It is the
+right answer for a book whose extraction lost its word boundaries, or a shelf
+that swamps every answer — `dyp remove` throws away the hours that embedded it
+and this does not. A set-aside book is still listed by `dyp books`, marked, and
+`-c` still matches it: a search says so in `warnings` and refuses outright if
+the whole scope is set aside.
+
 **Name a book, and note what it is** — `dyp books PATTERN --label NAME
 --note TEXT`. The label is a display name and something `-c` can match; the file
 is not renamed and keeps its own title, because ingest derives that and rewrites
@@ -190,9 +207,22 @@ library can hold two different works called Arakhin, and naming one is how you
 tell them apart and how you scope to just one.
 
 **Health & upkeep** — `dyp status` (totals, what to do next), `dyp check` (what
-drifted, what work is outstanding — never changes anything), `dyp books` (what is
-in the library). Then `backup` / `restore` / `relocate` / `remove` + `compact` /
-`lexical` as needed.
+drifted, what work is outstanding — never changes anything), `dyp books` /
+`dyp shelves` (what is in the library). Then `backup` / `restore` / `relocate` /
+`remove` + `compact` / `lexical` as needed.
+
+**Taking things out** has two settings at every level, and the difference is
+whether the embedding survives:
+
+| | reversible | for good |
+|---|---|---|
+| book | `dyp books PATTERN --aside` | `dyp remove PATTERN --yes` (+ `compact`) |
+| shelf | `dyp shelves --aside SHELF` | `dyp remove SHELF --yes` |
+| library | `dyp library remove NAME` | `dyp library remove NAME --delete --yes` |
+
+**No source text is ever deleted by any of them** — the right column removes the
+index's memory of the books, or the index directory, and never the files.
+Prefer the left column: it costs nothing, and it is one command back.
 
 → **`docs/indexing.md`** (add, embed, model choice, detecting bad extraction),
 **`docs/libraries.md`** (registry, several models, backup/restore, moving),
@@ -236,6 +266,10 @@ can drive both searching and administration structurally:
   and is routing whole? (`.models[].routing.unprofiled_books` — books `--route`
   cannot reach at all; non-zero means run `dyp route`)
 - `dyp books --json` / `dyp models --json` → what is here, per-book / per-model
+  (`set_aside` is non-null on a book no search will return; `shelf` is which
+  shelf it sits on)
+- `dyp shelves --json` → the shelves, their sizes and how many books on each are
+  set aside, plus the `root` their paths are relative to
 - `dyp library list --json` → the libraries, sizes and defaults
 - `dyp history --json` → embed runs (rate, how each ended) and index operations
 - `dyp asked --json` → what this library was already asked and what came back

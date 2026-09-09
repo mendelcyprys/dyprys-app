@@ -189,10 +189,17 @@ only — losing it costs nothing, every library still opens with `--data`.
 
 ```sh
 dyp books [PATTERN]    # what is in the library, or one book in detail
+dyp shelves            # the directories those books sit in, and their sizes
 dyp status             # totals, and what to do next
 dyp models             # embedding models: coverage, disk, routing profile
 dyp check              # what drifted, what work is outstanding — changes nothing
 ```
+
+A library holds shelves; a shelf holds books. A shelf is the directory the text
+was added from — derived, never stored, so it cannot disagree with the
+filesystem — and it is the level `-c` cuts along. On a 3,453-book library
+`dyp shelves` is three lines, and which of the three a question belongs to is
+usually worth more than any search flag.
 
 `check` is the one to run when something looks off: source files that moved or
 vanished, chunks awaiting embedding, whether the keyword index and routing
@@ -202,10 +209,18 @@ profile are current.
 dyp backup lib.tar.gz                              # index + vectors + text, one archive
 dyp restore lib.tar.gz --into ~/idx --sources ~/books --as name
 dyp relocate OLD NEW                               # the text moved; rewrite the paths
+dyp books PATTERN --aside                          # out of every search; nothing deleted
+dyp shelves --aside SHELF                          # the same, a shelf at a time
 dyp remove PATTERN --yes && dyp compact --yes      # forget books, reclaim their space
 dyp models --drop NAME --yes                       # remove a model and its vectors
 dyp models --quantise NAME                         # convert vectors to int8, a quarter the disk
 ```
+
+`--aside` is the one to reach for first. It takes books out of **every** search
+and leaves every vector where it is, so a badly extracted book stops polluting
+answers without discarding the hours that embedded it, and `--restore` is
+instant. `remove` is the other setting, and it is not recoverable — though even
+then the source files are untouched, as they are for every command here.
 
 An index is three things that travel together — the database, the vectors, and
 the source text the offsets point into — and `backup`/`restore` keep them

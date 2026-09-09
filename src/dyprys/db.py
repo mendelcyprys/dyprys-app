@@ -27,7 +27,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 DEFAULT_DATA_DIR = Path("data")
 DB_FILENAME = "dyprys.sqlite"
@@ -121,7 +121,21 @@ CREATE TABLE IF NOT EXISTS books (
     -- library can hold two different books called Arakhin. A label is a display
     -- name and something `-c` can match, nothing more.
     label    TEXT,
-    note     TEXT
+    note     TEXT,
+    -- When this book was set aside, or NULL while it is part of the library.
+    --
+    -- Set aside is not removed. Every vector, passage and BM25 row stays where
+    -- it is and costs nothing to keep; what changes is that no search reads
+    -- them -- `search.embedded_ranges` is the one place every retrieval path
+    -- goes through, and a set-aside book contributes no ranges there. Putting
+    -- one back is a single UPDATE, which is the whole point: the alternative
+    -- for a badly extracted book, or a shelf that swamps every answer, was
+    -- `dyp remove` and then hours of re-embedding to change your mind.
+    --
+    -- A timestamp rather than a flag, because when something left the library
+    -- is a fact worth having and `NOT NULL DEFAULT 0` would have been a lie on
+    -- every row that predates the column.
+    excluded_at TEXT
 );
 
 -- A file belonging to a book. One for a plain text dump; one per chapter for an
@@ -421,6 +435,10 @@ def _check_schema_version(conn: sqlite3.Connection) -> None:
         # what to call a book reads exactly as it did before.
         for column in ("label", "note"):
             _add_column(conn, "books", column, "TEXT")
+        # v17: a book can be set aside. NULL is "in the library", which every
+        # existing row is, so an index that has never set anything aside reads
+        # exactly as it did before and no search changes its answer.
+        _add_column(conn, "books", "excluded_at", "TEXT")
         set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     elif int(found) != SCHEMA_VERSION:
         raise ValueError(

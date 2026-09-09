@@ -106,6 +106,22 @@ export interface BookRow {
   note: string | null;
   /** The path. The only thing that says *which* book — titles collide. */
   key: string;
+  /**
+   * When it was set aside, or null while it is part of the library.
+   *
+   * A set-aside book keeps every vector it has and is returned by no search.
+   * It is still listed — marked — because a book nothing shows is one nobody
+   * can put back.
+   */
+  set_aside: string | null;
+  /**
+   * Which shelf it sits on: its directory, relative to the root every book in
+   * this library shares. "" is the root itself.
+   *
+   * Sent rather than sliced off `key` in the client, because the split point is
+   * a property of the whole library and a filtered page cannot compute it.
+   */
+  shelf: string;
   chunks: number;
   lexical_indexed: number;
   sources: BookSource[];
@@ -114,6 +130,57 @@ export interface BookRow {
   embedded: Record<string, number>;
   /** Chunks this model *could* embed — its own chunking, not the library's. */
   live_chunks: Record<string, number>;
+}
+
+/**
+ * A directory of books — the level between a library and a book.
+ *
+ * Derived from where the text actually sits rather than stored, so it cannot
+ * disagree with the filesystem. A book is on exactly one shelf: `papers` and
+ * `papers/old` are two shelves, not a parent and a child, so that setting one
+ * aside means one thing rather than two.
+ */
+export interface Shelf {
+  /** Relative to `Shelves.root`. "" is the root itself. */
+  path: string;
+  /** The last segment, or the root directory's own name. Not unique. */
+  name: string;
+  /** The absolute directory. What identifies it, and what `-c` matches. */
+  directory: string;
+  books: number;
+  /** How many of those are set aside. `books` counts them; searches do not. */
+  set_aside: number;
+  chunks: number;
+  bytes: number;
+  embedded: Record<string, number>;
+  live_chunks: Record<string, number>;
+}
+
+export interface Shelves {
+  shelves: Shelf[];
+  /** What every `path` above is relative to. */
+  root: string;
+}
+
+/** What removing something would take, before it takes it. */
+export interface Removal {
+  books: { key: string; title: string; chunks: number }[];
+  count: number;
+  chunks: number;
+  /** False on a preview. The same call with `confirm` returns it true. */
+  removed: boolean;
+}
+
+/** What deleting a library's index would destroy, and what it would spare. */
+export interface IndexDeletion {
+  name: string;
+  path: string;
+  exists: boolean;
+  files: number;
+  bytes: number;
+  /** Where the text lives. Not touched — this is here so that is checkable. */
+  sources: string | null;
+  deleted: boolean;
 }
 
 export interface ModelRow {
@@ -415,6 +482,33 @@ export const api = {
       key,
       ...given,
     }),
+
+  shelves: (name: string) => request<Shelves>(`/libraries/${encodeURIComponent(name)}/shelves`),
+
+  /**
+   * Take books out of every search, or put them back. Nothing is deleted.
+   *
+   * The only removal here with no confirmation step, because it is the only one
+   * that costs nothing to undo: the inverse is this call with `aside: false`.
+   * Addressed by whole keys or a whole shelf directory, never by pattern — a
+   * glob is right for a search and wrong for an action.
+   */
+  setAside: (name: string, what: { keys?: string[]; shelf?: string }, aside: boolean) =>
+    post<{ changed: number; set_aside: boolean }>(
+      `/libraries/${encodeURIComponent(name)}/books/aside`,
+      { ...what, aside },
+    ),
+
+  /** Forget books for good. Without `confirm` this is the preview and does nothing. */
+  removeBooks: (name: string, what: { keys?: string[]; shelf?: string }, confirm = false) =>
+    post<Removal>(`/libraries/${encodeURIComponent(name)}/books/remove`, { ...what, confirm }),
+
+  /** Erase a library's index. Without `confirm` this is the preview. The text stays. */
+  deleteIndex: (name: string, confirm = false) =>
+    request<IndexDeletion>(
+      `/libraries/${encodeURIComponent(name)}/index${confirm ? "?confirm=true" : ""}`,
+      { method: "DELETE" },
+    ),
 
   models: (name: string) =>
     request<{ models: ModelRow[] }>(`/libraries/${encodeURIComponent(name)}/models`),

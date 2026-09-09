@@ -34,7 +34,27 @@ export function Health({
 
   const faults: React.ReactNode[] = [];
 
-  if (!check.lexical_complete) {
+  // Incomplete and over-full are different problems with different fixes, and
+  // `lexical_complete` is false for both. Removing books leaves their FTS rows
+  // behind until compaction, exactly as it leaves their chunk ids — and `Run
+  // lexical` backfills what is missing, so it cannot help with a surplus.
+  if (!check.lexical_complete && check.lexical_chunks > check.live_chunks) {
+    faults.push(
+      <Fault
+        key="lexical-stale"
+        icon={<Type className="size-4 shrink-0 text-muted-foreground" />}
+        title={`The BM25 index holds ${(
+          check.lexical_chunks - check.live_chunks
+        ).toLocaleString()} rows for books that were removed.`}
+        what="Harmless to search — those chunks are gone, so nothing can rank them. They are the same dead space the removed books' chunk ids are, and compaction clears both at once."
+        action={
+          <Button size="sm" variant="outline" onClick={() => onRun("compact")} disabled={!canRun}>
+            Run compact
+          </Button>
+        }
+      />,
+    );
+  } else if (!check.lexical_complete) {
     faults.push(
       <Fault
         key="lexical"

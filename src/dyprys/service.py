@@ -669,6 +669,7 @@ def _router(conn, directory, embedder, model_id, books_wanted, candidates):
     if not books_wanted:
         return None, []
     from dyprys.routing import is_built, profile_gap, route
+    from dyprys.search import set_aside
     from dyprys.vectors import VectorStore
 
     if not is_built(conn, model_id):
@@ -693,8 +694,18 @@ def _router(conn, directory, embedder, model_id, books_wanted, candidates):
     centroids = VectorStore(db.centroids_path(directory, model_id), embedder.dim, total)
     last: dict = {}
 
+    # Stage 1 has `books_wanted` slots and a set-aside book cannot fill one:
+    # stage 2 would read nothing from it. `embedded_ranges` already makes the
+    # result *correct* -- this makes it not wasteful, which on a five-book route
+    # is the difference between five books searched and two.
+    hidden = set_aside(conn)
+    allowed = candidates
+    if hidden:
+        allowed = ({row["id"] for row in conn.execute("SELECT id FROM books")}
+                   if candidates is None else set(candidates)) - hidden
+
     def go(question, vector):
-        chosen = {b for b, _ in route(conn, centroids, vector, model_id, books_wanted, candidates)}
+        chosen = {b for b, _ in route(conn, centroids, vector, model_id, books_wanted, allowed)}
         last["books"] = chosen
         return chosen
 
@@ -862,9 +873,10 @@ def search(session: Session, question: str, options: SearchOptions | None = None
     say.check()
     embedder, model_id, store = session.model(options.model)
 
-    from dyprys.search import resolve, scanned_fraction, scope
+    from dyprys.search import resolve, scanned_fraction, scope, set_aside
 
     books = None
+    aside: list[str] = []
     if options.collection:
         books, missed = scope(conn, options.collection)
         # Every miss, not only the case where nothing matched at all. Under a
@@ -875,9 +887,35 @@ def search(session: Session, question: str, options: SearchOptions | None = None
             named = ", ".join(repr(pattern) for pattern in missed)
             raise errors.NoSuchBook(
                 f"no book matches {named}; try `dyp books`")
+        # A pattern still *matches* a set-aside book -- it is in the index and
+        # `dyp books` lists it -- but no search will read one, so scoping to a
+        # shelf that has been set aside returns a full k of results from books
+        # the person did not ask about, and nothing says why. This is the same
+        # class of silence as the unprofiled-book warning, and it gets the same
+        # treatment rather than a refusal: some of the scope may be live.
+        hidden = books & set_aside(conn)
+        if hidden:
+            aside = [row["title"] for row in conn.execute(
+                "SELECT title FROM books WHERE id IN (%s) ORDER BY title LIMIT 6"
+                % ",".join("?" * len(hidden)), sorted(hidden))]
+            books -= hidden
+            if not books:
+                # Every book the scope named is set aside. Searching on would
+                # return a full k from everywhere else, which is the opposite
+                # of what `-c` promises.
+                raise errors.NoSuchBook(
+                    "every book this scope matches is set aside; "
+                    "put one back to search it")
 
     router, warnings = _router(conn, session.directory, embedder, model_id,
                                options.route, books)
+    if aside:
+        shown = ", ".join(aside[:3])
+        warnings.insert(0, Advisory(
+            "books_set_aside",
+            f"{len(aside)} book(s) this scope matched are set aside and were not "
+            f"searched ({shown}{', …' if len(aside) > 3 else ''}); "
+            f"put them back to include them."))
     for advisory in warnings:
         say.note(advisory.message, kind=advisory.kind)
     # Before loading a cross-encoder, which is the single longest thing a search
@@ -1129,6 +1167,16 @@ def books_payload(conn, pattern: str | None = None) -> dict:
             # not make the second one unrecoverable.
             "label": b.label,
             "note": b.note,
+            # When it was set aside, or null while it is in the library. A
+            # set-aside book keeps every vector and is returned by no search --
+            # so it is listed here, marked, rather than hidden from the listing
+            # too: a book nothing can find and nothing shows is one nobody can
+            # put back.
+            "set_aside": b.set_aside,
+            # The shelf it sits on, sent rather than derived in the client. The
+            # split point is the root every book in *this* library shares, which
+            # a client holding one page of a filtered list cannot compute.
+            "shelf": b.shelf,
             "chunks": b.chunks,
             "lexical_indexed": b.lexical,
             "sources": [
@@ -1144,6 +1192,135 @@ def books_payload(conn, pattern: str | None = None) -> dict:
             "live_chunks": {name: b.live_for(name) for name in b.per_model},
         }
         for b in inspect(conn, pattern)]}
+
+
+def shelves_payload(conn) -> dict:
+    """Libraries hold shelves hold books -- the middle level, as data.
+
+    A shelf is a directory of books, derived rather than stored (see
+    `library.shelves`). It is the unit a person actually reasons about: `-c` has
+    always taken one, `dyp embed -c` fills one at a time, and a library of 3,453
+    books is three shelves.
+    """
+    from dyprys.library import shelves as inspect, text_root
+
+    found = inspect(conn)
+    return {"shelves": [
+        {
+            "path": sh.path,
+            "name": sh.name,
+            # What identifies it and what `-c` matches. The path is relative and
+            # can repeat between libraries; this cannot.
+            "directory": sh.directory,
+            "books": sh.books,
+            "set_aside": sh.set_aside,
+            "chunks": sh.chunks,
+            "bytes": sh.bytes,
+            "embedded": sh.embedded,
+            "live_chunks": sh.live_chunks,
+        }
+        for sh in found],
+        # What the paths above are relative to, so a client can show a full
+        # location without reassembling one from a relative path and a guess.
+        "root": text_root(conn)}
+
+
+# --------------------------------------------------------------------------
+# Taking books out of a library, for a while or for good
+# --------------------------------------------------------------------------
+
+
+def books_named(conn, *, keys=None, shelf: str | None = None) -> list:
+    """The books a request names, addressed exactly rather than by pattern.
+
+    `-c` takes a fuzzy pattern because a search that ranks the wrong book costs
+    a second look. Setting a shelf aside or dropping it does not, so nothing
+    here globs: `keys` are whole book keys and `shelf` is a whole directory. A
+    caller that means "everything matching *Atlas*" resolves it against
+    `GET /books` first and sends the keys, which also means the list it acted on
+    is the list it showed.
+    """
+    from pathlib import Path
+
+    from dyprys.library import books as inspect
+
+    if (keys is None) == (shelf is None):
+        raise errors.BadRequest("name exactly one of: keys, shelf")
+
+    found = inspect(conn)
+    if shelf is not None:
+        wanted = str(Path(shelf))
+        chosen = [b for b in found if str(Path(b.key).parent) == wanted]
+        if not chosen:
+            raise errors.NoSuchBook(f"no shelf at {shelf!r}; try `dyp shelves`")
+        return chosen
+
+    asked = list(dict.fromkeys(keys))
+    by_key = {b.key: b for b in found}
+    missing = [k for k in asked if k not in by_key]
+    if missing:
+        shown = ", ".join(repr(k) for k in missing[:3])
+        raise errors.NoSuchBook(
+            f"{len(missing)} of {len(asked)} key(s) are not in this library: {shown}")
+    return [by_key[k] for k in asked]
+
+
+def set_books_aside(conn, chosen: list, aside: bool) -> dict:
+    """Take books out of every search, or put them back. Nothing is deleted.
+
+    The reversible half of removing something. Vectors, passages and BM25 rows
+    all stay exactly where they are -- what changes is that
+    `search.embedded_ranges` stops offering them, which is every retrieval path
+    at once. So a garbled book stops polluting answers without discarding the
+    hours that embedded it, and changing your mind costs one UPDATE.
+    """
+    ids = [b.id for b in chosen]
+    if not ids:
+        return {"changed": 0, "set_aside": aside, "books": []}
+    marks = ",".join("?" * len(ids))
+    stamp = db.now() if aside else None
+    with conn:
+        changed = conn.execute(
+            f"UPDATE books SET excluded_at = ? WHERE id IN ({marks}) "
+            f"AND excluded_at IS {'NULL' if aside else 'NOT NULL'}",
+            [stamp, *ids]).rowcount
+    if changed:
+        db.record_event(conn, "set_aside" if aside else "restored",
+                        f"{changed} book(s)")
+    return {"changed": changed, "set_aside": aside,
+            "books": [{"key": b.key, "title": b.title} for b in chosen]}
+
+
+def drop_books(conn, chosen: list, *, confirm: bool = False) -> dict:
+    """Forget books entirely. Their source files are not touched.
+
+    Unconfirmed this is the preview and changes nothing, which is the same
+    two-step `dyp remove` has: the count and the titles come back so a caller
+    can show exactly what it is about to do, and `confirm` does it.
+
+    What goes is the index's memory of these books -- their rows, their
+    passages, their centroids. Their chunk ids become dead space that `compact`
+    reclaims, and their vectors are gone for good: putting one back means
+    `dyp add` and embedding it again. That is the difference from setting one
+    aside, and it is worth saying out loud before doing it.
+    """
+    from dyprys.compact import remove_books
+
+    chunks = sum(b.chunks for b in chosen)
+    payload = {
+        "books": [{"key": b.key, "title": b.title, "chunks": b.chunks} for b in chosen],
+        "count": len(chosen),
+        "chunks": chunks,
+        "removed": False,
+    }
+    if not confirm:
+        return payload
+
+    remove_books(conn, {b.id for b in chosen})
+    db.record_event(conn, "remove",
+                    f"{len(chosen)} book(s), {chunks:,} chunks left reclaimable")
+    payload["removed"] = True
+    return payload
 
 
 def describe_book(conn, key: str, *, label=..., note=...) -> dict:
@@ -1542,9 +1719,9 @@ def register_library(name: str, path, make_default: bool | None = None) -> dict:
 def forget_library(name: str) -> dict:
     """Drop a name. The index and the text behind it are not touched.
 
-    Deliberately *only* the name. `dyp library remove --delete` will erase an
-    index directory; over HTTP that is a button one misclick away from days of
-    embedding, so the API does not offer it and the message says where it lives.
+    The reversible half: `dyp library add` with the same path brings back
+    everything, because nothing left the disk. `delete_library` is the other
+    half.
     """
     from dyprys import registry
 
@@ -1553,6 +1730,78 @@ def forget_library(name: str) -> dict:
             f"no library named {name!r}",
             choices=[entry.name for entry in registry.libraries()])
     return libraries_payload()
+
+
+def library_deletion(name: str) -> dict:
+    """What deleting this library's index would destroy, and what it would spare.
+
+    Its own function because it is what a confirmation must be built from, and
+    because the CLI and a browser have to describe the same act in the same
+    terms. The distinction that matters is the one people get wrong: an index
+    directory holds the vectors, which took hours, and the *text* lives
+    somewhere else and is not touched.
+    """
+    from dyprys import registry
+
+    entry = next((l for l in registry.libraries()
+                  if l.name == (name or "").strip()), None)
+    if entry is None:
+        raise errors.NoSuchLibrary(
+            f"no library named {name!r}",
+            choices=[e.name for e in registry.libraries()])
+    from pathlib import Path
+
+    files, size = registry.contents(entry.path)
+    return {"name": entry.name, "path": str(entry.path),
+            "exists": Path(entry.path).exists(),
+            "files": files, "bytes": size, "sources": _sources_under(entry.path),
+            "deleted": False}
+
+
+def _sources_under(index_dir) -> str | None:
+    """Where this index's text lives, so a delete can say what it is sparing.
+
+    The root every book shares, not the first source file's directory. On a
+    library with shelves the first file sits on one of them, and a confirmation
+    reading "kept: .../texts/notes" claims to spare a third of what it spares --
+    which is the wrong direction to be wrong in, on this dialog of all of them.
+    """
+    from pathlib import Path
+
+    from dyprys.library import text_root
+
+    try:
+        conn = db.connect(Path(index_dir))
+    except Exception:
+        return None
+    try:
+        return text_root(conn) or None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
+def delete_library(name: str, *, confirm: bool = False) -> dict:
+    """Erase a library's index directory and forget its name.
+
+    Unconfirmed this is the preview and deletes nothing, the same two-step
+    `dyp remove` uses. The vectors go and cannot be recovered without embedding
+    again; **the source text is not touched**, and the preview says where it is
+    so that claim can be checked rather than believed.
+    """
+    import shutil
+
+    from dyprys import registry
+
+    plan = library_deletion(name)
+    if not confirm:
+        return plan
+    shutil.rmtree(plan["path"], ignore_errors=True)
+    registry.remove(plan["name"])
+    plan["deleted"] = True
+    plan["libraries"] = libraries_payload()["libraries"]
+    return plan
 
 
 def default_library(name: str) -> dict:

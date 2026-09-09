@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, ChevronsUpDown, CircleSlash, FolderPlus, Star, Trash2 } from "lucide-react";
+import { Check, ChevronsUpDown, CircleSlash, EyeOff, FolderPlus, Star, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import { ModelCoverage } from "@/components/coverage";
 import type { LibraryRow } from "@/lib/api";
 import { useRegistryWrite } from "@/lib/queries";
 import { cn, count } from "@/lib/utils";
+import { DeleteIndex } from "./delete-index";
 import { RegisterLibrary } from "./register-library";
 
 /**
@@ -39,6 +40,9 @@ export function LibraryPicker({
   // Controlled, so closing clears it. A filter left behind from last time is
   // read as "no library by that name" the next time the picker opens.
   const [filter, setFilter] = React.useState("");
+  // Which library's index a confirmation is open for. Held by name rather than
+  // by row, because the row is refetched while the dialog is up.
+  const [deleting, setDeleting] = React.useState<string | null>(null);
   const current = libraries.find((row) => row.name === selected);
   const { forget, makeDefault } = useRegistryWrite();
 
@@ -146,11 +150,15 @@ export function LibraryPicker({
                       </Button>
                     </Tooltip>
                   )}
-                  <Tooltip label="forget the name — the index and the text are not touched">
+                  {/* Two removals, and the difference between them is the
+                      whole reason they are two buttons. Forgetting a name
+                      touches nothing on disk and is undone by adding the same
+                      path again; deleting the index destroys the vectors. */}
+                  <Tooltip label="forget the name — nothing on disk is touched, and adding the same path again brings it all back">
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="size-6 text-muted-foreground hover:text-destructive"
+                      className="size-6 text-muted-foreground hover:text-foreground"
                       onClick={(event) => {
                         event.stopPropagation();
                         forget.mutate(row.name, {
@@ -158,9 +166,24 @@ export function LibraryPicker({
                         });
                       }}
                     >
-                      <Trash2 className="size-3" />
+                      <EyeOff className="size-3" />
                     </Button>
                   </Tooltip>
+                  {row.exists && (
+                    <Tooltip label="delete the index itself — the vectors go, the text stays. Previewed and confirmed first.">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-6 text-muted-foreground hover:text-destructive"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setDeleting(row.name);
+                        }}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </Tooltip>
+                  )}
                 </span>
               </CommandItem>
             ))}
@@ -181,6 +204,18 @@ export function LibraryPicker({
           />
         </div>
       </PopoverContent>
+
+      {deleting && (
+        <DeleteIndex
+          name={deleting}
+          open
+          onOpenChange={(next) => !next && setDeleting(null)}
+          onDeleted={() => {
+            if (deleting === selected) onSelect("");
+            setOpen(false);
+          }}
+        />
+      )}
     </Popover>
   );
 }

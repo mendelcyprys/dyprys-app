@@ -108,8 +108,20 @@ def scope_books(conn: sqlite3.Connection,
     return scope(conn, patterns)[0]
 
 
+def set_aside(conn: sqlite3.Connection) -> set[int]:
+    """Books that are in the index but out of the library.
+
+    Kept separate from `scope` because it is not a scope: `-c` is a promise
+    about which books were *ranked*, and this is a statement about which books
+    exist to rank at all. A search never has to ask for it and cannot opt out.
+    """
+    return {row["id"] for row in
+            conn.execute("SELECT id FROM books WHERE excluded_at IS NOT NULL")}
+
+
 def embedded_ranges(
-    conn: sqlite3.Connection, model_id: int, book_ids: set[int] | None = None
+    conn: sqlite3.Connection, model_id: int, book_ids: set[int] | None = None,
+    *, everything: bool = False,
 ) -> list[tuple[int, int]]:
     """Half-open chunk-id ranges holding a vector for this model.
 
@@ -117,9 +129,21 @@ def embedded_ranges(
     half-embedded library is exact rather than approximately right.  With
     `book_ids`, only those books -- which is the same restriction stage 2 of
     routing applies, reached from a user's flag instead of from centroids.
+
+    **Books set aside contribute no ranges**, and this is the only place that is
+    enforced. Every retrieval path in the tool -- the vector scan, BM25's OR of
+    words, and BM25's exact-phrase attempt, which deliberately escapes `-c` and
+    searches the library whole -- reaches its scope through this function, so
+    one filter here is a filter everywhere. A second copy in `flat_search` and a
+    third in `search_bm25` is exactly how a set-aside book comes back on a
+    remembered phrase and nobody can say why.
+
+    `everything=True` is for accounting rather than searching: what is on disk,
+    what compaction would move, what a backup holds. Those numbers must not
+    change because somebody hid a shelf.
     """
     sql = (
-        "SELECT seg.chunk_start, p.n_embedded FROM segment_progress p "
+        "SELECT seg.chunk_start, p.n_embedded, src.book_id FROM segment_progress p "
         "JOIN segments seg ON seg.id = p.segment_id "
         "JOIN sources src ON src.id = seg.source_id "
         "WHERE p.model_id = ? AND p.n_embedded > 0"
@@ -130,9 +154,14 @@ def embedded_ranges(
             return []
         sql += f" AND src.book_id IN ({','.join('?' * len(book_ids))})"
         params.extend(sorted(book_ids))
+    # Filtered in Python rather than as `NOT IN (...)`: setting aside a whole
+    # shelf is 1,679 books on one real library, and the parameter list is the
+    # one thing here that grows with how much someone hid.
+    hidden = set() if everything else set_aside(conn)
     return _merge(
         (row["chunk_start"], row["chunk_start"] + row["n_embedded"])
         for row in conn.execute(sql + " ORDER BY seg.chunk_start", params)
+        if row["book_id"] not in hidden
     )
 
 
