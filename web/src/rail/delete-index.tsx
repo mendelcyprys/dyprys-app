@@ -16,10 +16,16 @@ import { bytes, count } from "@/lib/utils";
  * function the terminal prints from, so what a person confirms is the actual
  * file count and the actual size rather than a sentence someone wrote once.
  *
- * The distinction it exists to make is the one people get wrong. An index
- * directory holds the **vectors**, which took hours and cannot be recovered.
- * The **text** lives somewhere else and is not touched — and the preview says
- * where, so that is checkable rather than a promise.
+ * The distinction it exists to make is the one people get wrong. An index holds
+ * the **vectors**, which took hours and cannot be recovered. The **text** is not
+ * touched — and the preview says where it is, so that is checkable rather than
+ * a promise.
+ *
+ * "Somewhere else" is the part that was not always true. A library added in
+ * place keeps its books in the index directory, and this panel said they were
+ * elsewhere while printing that directory's own path above it. The server now
+ * reports `shares_directory` and what stays behind, so both layouts read as
+ * what they are.
  */
 export function DeleteIndex({
   name,
@@ -81,8 +87,8 @@ export function DeleteIndex({
                 </p>
                 <p className="break-all font-mono text-[10px]">{plan.path}</p>
                 <p className="text-xs text-muted-foreground">
-                  {count(plan.files, "file")}, {bytes(plan.bytes)} — the index, its vectors and its
-                  routing profile. Rebuilding them means embedding the library again.
+                  {count(plan.files, "file")}, {bytes(plan.bytes)} — the database, its vectors and
+                  its routing profile. Rebuilding them means embedding the library again.
                 </p>
               </div>
 
@@ -93,11 +99,25 @@ export function DeleteIndex({
                 {plan.sources ? (
                   <>
                     <p className="break-all font-mono text-[10px]">{plan.sources}</p>
-                    <p className="text-xs text-muted-foreground">
-                      The books themselves. They are somewhere else, and nothing here touches them —
-                      <code className="font-mono"> dyp add</code> on that directory starts the
-                      library again.
-                    </p>
+                    {/* Which of these is true depends on the layout, and the
+                        one that was printed unconditionally was the wrong one
+                        on a library added in place: it read "they are somewhere
+                        else" directly under the path being deleted. */}
+                    {plan.shares_directory ? (
+                      <p className="text-xs text-muted-foreground">
+                        The books themselves — and they are{" "}
+                        <strong className="font-medium text-foreground">in that directory</strong>,
+                        not somewhere else. Only the index files above are removed;{" "}
+                        {count(plan.kept_files, "file")} ({bytes(plan.kept_bytes)}) stay where they
+                        are, and the directory itself stays with them.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        The books themselves. They are somewhere else, and nothing here touches them
+                        —<code className="font-mono"> dyp add</code> on that directory starts the
+                        library again.
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-muted-foreground">

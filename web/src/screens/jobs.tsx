@@ -148,7 +148,12 @@ export function Jobs({ library }: { library: string }) {
 
   return (
     <div className="space-y-4 overflow-y-auto">
-      <Health check={check.data} onRun={(kind) => start(kind)} canRun={!held && !mustChoose} />
+      <Health
+        library={library}
+        check={check.data}
+        onRun={(kind) => start(kind)}
+        canRun={!held && !mustChoose}
+      />
 
       {unprofiled > 0 && (
         // The single most valuable nudge here, because the failure it prevents

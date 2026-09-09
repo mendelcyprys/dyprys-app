@@ -83,6 +83,10 @@ class Garbled:
     title: str
     chunks: int
     p90_token: int
+    # What to act on. Titles collide -- one library holds two different works
+    # called Arakhin -- so anything offering to *do* something about one of
+    # these books has to name it by its key, the same rule results follow.
+    key: str = ""
 
 
 @dataclass
@@ -182,7 +186,7 @@ def garbled_books(
 
     found = []
     for book in conn.execute(
-        "SELECT b.id, b.title, seg.chunk_start, seg.chunk_count, src.path "
+        "SELECT b.id, b.title, b.key, seg.chunk_start, seg.chunk_count, src.path "
         "FROM books b JOIN sources src ON src.book_id = b.id "
         "JOIN segments seg ON seg.source_id = src.id ORDER BY b.id"
     ):
@@ -208,7 +212,7 @@ def garbled_books(
         lengths.sort()
         p90 = lengths[int(len(lengths) * 0.9)]
         if p90 > GLUED_TOKEN_LENGTH:
-            found.append(Garbled(book["title"], book["chunk_count"], p90))
+            found.append(Garbled(book["title"], book["chunk_count"], p90, book["key"]))
         if len(found) >= limit:
             break
     return found

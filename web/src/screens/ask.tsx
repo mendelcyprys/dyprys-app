@@ -7,7 +7,7 @@ import { askStream, DyprysError, type Answered, type SearchBody, type Stage } fr
 import { usePending } from "@/lib/pending";
 import { useSelection } from "@/lib/selection";
 import { useDefaults } from "@/lib/queries";
-import { effortLabel, useSearchSettings } from "@/lib/settings";
+import { effortLabel, type Settings, useSearchSettings } from "@/lib/settings";
 import { ModelChoices } from "@/rail/model-picker";
 import { Reader, type Reading } from "./reader";
 import { Results } from "./results";
@@ -31,6 +31,12 @@ export function Ask({ library }: { library: string }) {
   // results escaped it -- the same mistake as reading provenance off a
   // pipeline that has since been run again.
   const [asked, setAsked] = React.useState<string[]>([]);
+  // ...and the settings it was found under, for the same reason. The badge row
+  // read `settings` live while sitting directly above a finished answer, so
+  // switching the effort to Plain relabelled a reranked result "plain" without
+  // touching it. Same mistake as reading provenance off a pipeline that has
+  // since been run again -- which is the one `asked` already exists to avoid.
+  const [under, setUnder] = React.useState<Settings | null>(null);
   const [failure, setFailure] = React.useState<DyprysError | null>(null);
   const [running, setRunning] = React.useState(false);
   const [reading, setReading] = React.useState<Reading | null>(null);
@@ -95,6 +101,7 @@ export function Ask({ library }: { library: string }) {
 
     try {
       setAsked(scope);
+      setUnder(settings);
       setAnswered(
         await askStream(
           library,
@@ -156,6 +163,12 @@ export function Ask({ library }: { library: string }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [answered, cursor]);
 
+  // While a search is in flight `under` already holds its settings, so this is
+  // right at every moment: the next search's before one has run, the running
+  // one's while it runs, the finished one's after.
+  const shown = under ?? settings;
+  const stale = Boolean(answered) && JSON.stringify(shown) !== JSON.stringify(settings);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <form onSubmit={run} className="flex items-center gap-2">
@@ -189,22 +202,32 @@ export function Ask({ library }: { library: string }) {
       </form>
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        {/* What this search will do, before it does it — one badge per axis
-            that is not at its default, so "routed" and "rerank 10" can both be
-            true and both be visible. */}
+        {/* What the search did, once it has — and what the next one will do
+            until then. One badge per axis that is not at its default, so
+            "routed" and "rerank 10" can both be true and both be visible.
+
+            `shown` rather than `settings`: these sit directly above the answer
+            and are read as describing it. */}
         <Badge variant="outline">
-          {settings.route > 0 ? `routed ${settings.route}` : "whole library"}
+          {shown.route > 0 ? `routed ${shown.route}` : "whole library"}
         </Badge>
         <Badge variant="outline">
-          {settings.effort === "rerank"
-            ? `rerank ${settings.depth}`
-            : effortLabel(settings.effort).toLowerCase()}
+          {shown.effort === "rerank"
+            ? `rerank ${shown.depth}`
+            : effortLabel(shown.effort).toLowerCase()}
         </Badge>
-        {scope.length > 0 && <Badge variant="outline">{count(scope.length, "book")}</Badge>}
-        {settings.summarise && (
-          <Badge variant="outline">{settings.summariser ?? "summarised"}</Badge>
+        {(answered ? asked : scope).length > 0 && (
+          <Badge variant="outline">{count((answered ? asked : scope).length, "book")}</Badge>
         )}
-        {settings.effort === "rerank" && !settings.reranker && !remembered?.reranker && (
+        {shown.summarise && <Badge variant="outline">{shown.summariser ?? "summarised"}</Badge>}
+        {stale && (
+          // Said once, quietly, instead of letting the badges drift: the
+          // settings have moved on and these results have not.
+          <span className="text-muted-foreground/70">
+            · settings changed since — ask again to use them
+          </span>
+        )}
+        {shown.effort === "rerank" && !shown.reranker && !remembered?.reranker && (
           // Bare rerank is a 503, not a downgrade — better said before the
           // search than after it.
           <span className="text-amber-500">
@@ -235,7 +258,11 @@ export function Ask({ library }: { library: string }) {
                 className="rounded-md border text-xs"
               >
                 <summary className="cursor-pointer px-3 py-2 text-muted-foreground">
-                  how this was found — {count(stages.length, "step")}
+                  {/* Only the stages, not their detail lines. Routing emits one
+                      step and then names each book it kept underneath it, so a
+                      single routed search announced itself as "6 steps". */}
+                  how this was found —{" "}
+                  {count(stages.filter((stage) => stage.indent === 0).length, "step")}
                 </summary>
                 <ol className="space-y-0.5 border-t px-3 py-2">
                   {stages.map((stage, index) => (

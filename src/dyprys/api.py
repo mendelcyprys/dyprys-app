@@ -292,14 +292,15 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
 
     @app.delete("/api/libraries/{name}/index")
     async def delete_index(name: str, confirm: bool = False):
-        """Erase a library's index directory. **The source text is not touched.**
+        """Erase a library's index. **The source text is not touched.**
 
         Its own route rather than a flag on the one above, and unconfirmed by
         default, because this is the one button here that can cost days of
         embedding and nothing brings it back. Without `confirm` it deletes
-        nothing and returns what it would delete — file count, bytes, and where
-        the text lives — so a client can show the difference between the
-        vectors, which go, and the books, which stay.
+        nothing and returns what it would delete — file count, bytes, where the
+        text lives, whether that is this same directory, and how much stays —
+        so a client can show the difference between the vectors, which go, and
+        the books, which stay.
 
         This used to have no route at all on the grounds that a browser is the
         wrong place to confirm it. The preview *is* that confirmation, built
@@ -530,7 +531,8 @@ def create_app(load_model=None, origins=None, web=None, keep: int = 2) -> FastAP
                                 _options_from(body), progress)
         payload = service.results_as_json(
             result.question, result.mode, result.routed, result.scanned_fraction,
-            result.elapsed_ms, result.passages, result.why, result.cosine)
+            result.elapsed_ms, result.passages, result.why, result.cosine,
+            reranked=result.reranked)
         # Rides on the payload because over HTTP there is no stderr to print it
         # to: an unreachable book is the one failure a reader cannot detect from
         # the output, since the response is a full `k` results at 200.

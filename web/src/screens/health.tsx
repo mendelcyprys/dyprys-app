@@ -1,7 +1,8 @@
 import * as React from "react";
-import { AlertTriangle, FileWarning, Type } from "lucide-react";
+import { AlertTriangle, Archive, FileWarning, Loader2, Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Check, JobKind } from "@/lib/api";
+import { useRemoval } from "@/lib/queries";
 import { count } from "@/lib/utils";
 
 /**
@@ -22,14 +23,17 @@ import { count } from "@/lib/utils";
  * it is a panel nobody reads.
  */
 export function Health({
+  library,
   check,
   onRun,
   canRun,
 }: {
+  library: string;
   check?: Check;
   onRun: (kind: JobKind) => void;
   canRun: boolean;
 }) {
+  const { aside } = useRemoval(library);
   if (!check) return null;
 
   const faults: React.ReactNode[] = [];
@@ -95,18 +99,38 @@ export function Health({
   }
 
   if (check.garbled.length > 0) {
+    // Older servers sent no key with a garbled book; without one there is
+    // nothing safe to act on, so the button is simply not offered.
+    const keys = check.garbled.map((book) => book.key).filter((key): key is string => Boolean(key));
     faults.push(
       <Fault
         key="garbled"
         icon={<AlertTriangle className="size-4 shrink-0 text-amber-500" />}
         title={`${count(check.garbled.length, "book")} look like failed extraction.`}
-        what="Words are run together, so nothing tokenises and no query can match them — at full embedding cost. The fix is upstream: extract the text again and re-add it."
+        what="Words are run together, so nothing tokenises and no query can match them — at full embedding cost. Setting them aside takes them out of every search and keeps the embedding, which is what to do until the text can be extracted again and re-added."
         detail={check.garbled.map(
           (book) =>
             `${book.title} — ${count(book.chunks, "chunk")}${
               book.p90_token ? `, tokens up to ${book.p90_token} characters` : ""
             }`,
         )}
+        // This panel described the problem that set-aside was built for and
+        // offered no way to do it — the one place in the app where the fix and
+        // the diagnosis were a tab apart. By key, never by title: two books can
+        // answer to one name, and this is a mutation.
+        action={
+          keys.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={aside.isPending}
+              onClick={() => aside.mutate({ keys, aside: true })}
+            >
+              {aside.isPending ? <Loader2 className="animate-spin" /> : <Archive />}
+              Set {keys.length === 1 ? "it" : "them"} aside
+            </Button>
+          )
+        }
       />,
     );
   }

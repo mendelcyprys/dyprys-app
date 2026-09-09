@@ -106,9 +106,25 @@ export function Books({ library }: { library: string }) {
     overscan: 12,
   });
 
-  const shownKeys = found.map((row) => row.key);
-  const allShown = shownKeys.length > 0 && shownKeys.every((key) => chosen.has(key));
-  const someShown = !allShown && shownKeys.some((key) => chosen.has(key));
+  /**
+   * What "everything listed" is, as patterns rather than as keys.
+   *
+   * Ticking this used to put every visible book key in the scope: on `neuro`
+   * that is 3,453 patterns, 2.4 seconds of work to build, a rail reading
+   * "+3,447 more", and a request asking the server to resolve three thousand
+   * patterns one at a time — to say what three shelf names say, or what an
+   * empty scope says. The shelf checkboxes had already settled the right unit;
+   * this is the same unit, one row up.
+   */
+  const shownPatterns = React.useMemo(
+    () =>
+      pattern
+        ? [pattern]
+        : rows.flatMap((row) => (row.kind === "shelf" ? [row.shelf.directory] : [])),
+    [pattern, rows],
+  );
+  const allShown = shownPatterns.length > 0 && shownPatterns.every((each) => chosen.has(each));
+  const someShown = !allShown && shownPatterns.some((each) => chosen.has(each));
 
   function toggle(key: string) {
     setScope(chosen.has(key) ? scope.filter((each) => each !== key) : [...scope, key]);
@@ -117,8 +133,8 @@ export function Books({ library }: { library: string }) {
   function toggleShown() {
     setScope(
       allShown
-        ? scope.filter((each) => !shownKeys.includes(each))
-        : [...new Set([...scope, ...shownKeys])],
+        ? scope.filter((each) => !shownPatterns.includes(each))
+        : [...new Set([...scope, ...shownPatterns])],
     );
   }
 
@@ -206,7 +222,12 @@ export function Books({ library }: { library: string }) {
       </div>
 
       <div className="flex items-center gap-3 px-1 text-xs text-muted-foreground">
-        <Checkbox checked={allShown} indeterminate={someShown} onCheckedChange={toggleShown} />
+        <Checkbox
+          checked={allShown}
+          indeterminate={someShown}
+          onCheckedChange={toggleShown}
+          aria-label="ask only what is listed here"
+        />
         <span>
           {books.isLoading
             ? "reading…"
@@ -395,6 +416,7 @@ function ShelfHead({
           size="icon"
           variant="ghost"
           className="size-7 shrink-0 text-muted-foreground hover:text-destructive"
+          aria-label={`set aside or remove the ${shelf.path || shelf.name} shelf`}
           onClick={(event) => {
             event.stopPropagation();
             onRemove();

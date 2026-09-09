@@ -93,7 +93,7 @@ faster.
 
 ```json
 {
-  "query": "...", "mode": "hybrid", "routed": false,
+  "query": "...", "mode": "hybrid", "routed": false, "reranked": 0,
   "scanned_fraction": 0.0141, "elapsed_ms": 91.2,
   "results": [
     {"rank": 1, "chunk_id": 21482, "book": "Principles", "chapter": null,
@@ -106,6 +106,12 @@ faster.
 
 - `provenance` is the native rank signal, not a fused score (a fused RRF score
   spans only 0.016–0.033 and is uninterpretable — never surface one).
+- `reranked` is how many candidates a cross-encoder rescored, `0` when none
+  did, and a reranked result carries a `rerank N` part in its `provenance`
+  ahead of the retrieval ranks — because the cross-encoder is what put it
+  there, and the retrieval ranks say where it had been. Reranking used to
+  report nothing at all, so a reordered answer and a plain one were
+  indistinguishable afterwards even though one had cost thirty times as much.
 - `offset` is the **chunk's** own start. The printed output shows a different
   byte for the same result, and both are real: a chunk boundary is a byte
   budget, so a passage usually begins mid-sentence, and the display widens it

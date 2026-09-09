@@ -245,9 +245,25 @@ def summarise(path: Path) -> Contents | None:
 
 
 def contents(path: Path) -> tuple[int, int]:
-    """(files, bytes) of an index directory — what dropping it would remove."""
-    files = [p for p in Path(path).glob("*") if p.is_file()]
-    return len(files), sum(p.stat().st_size for p in files)
+    """(files, bytes) of the index in `path` — what deleting it would remove.
+
+    The index's own files, counted through `.jobs/`, rather than everything in
+    the directory. Both halves of that were wrong, in opposite directions: a
+    top-level `glob("*")` counted a library's *books* as "the index, its
+    vectors and its routing profile" whenever the two share a directory, and
+    missed every log under `.jobs/` when they do not. A number in a
+    confirmation is only worth showing if it is the number of the thing being
+    confirmed.
+    """
+    from dyprys import db
+
+    files = size = 0
+    for artefact in db.artefacts(path):
+        here = [artefact] if artefact.is_file() else [
+            p for p in artefact.rglob("*") if p.is_file()]
+        files += len(here)
+        size += sum(p.stat().st_size for p in here)
+    return files, size
 
 
 def use(name: str) -> bool:

@@ -26,7 +26,7 @@ dyp library add neuro ~/indexes/neuro   # name a directory (first one becomes de
 dyp library list                        # names, sizes, models; * marks the default
 dyp library use neuro                   # change the default
 dyp library remove neuro                # forget the name only; files untouched
-dyp library remove neuro --delete --yes # also delete the index dir (NOT the source text)
+dyp library remove neuro --delete --yes # also delete the index files (NOT the source text)
 ```
 
 Holds names and paths only — a small JSON file, written atomically and moved

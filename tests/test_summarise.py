@@ -290,3 +290,29 @@ def test_the_retry_is_the_refusal_path_only():
 
     refused = answer_from(NO_ANSWER, PASSAGES)
     assert refused.prose.strip() == NO_ANSWER
+
+
+def test_a_model_that_refuses_and_keeps_talking_is_still_refusing():
+    """The refusal a strict equality test cannot see.
+
+    Told to "reply exactly: NO ANSWER IN PASSAGES", a real model produced one
+    quoted sentence and then the sentinel underneath it. `prose.strip() ==
+    NO_ANSWER` was the test in three places, so all three read that as an
+    answer: the rephrase-and-try-again never ran, and the token was printed to
+    the reader as though it were prose.
+
+    Normalising here is what keeps the three in step -- every caller can go on
+    comparing for equality, and none of them decides this separately.
+    """
+    chatty = ("Goldman Sachs advised the Special Committee. [1]\n"
+              "\n"
+              "NO ANSWER IN PASSAGES")
+
+    got = answer_from(chatty, PASSAGES)
+
+    assert got.prose.strip() == NO_ANSWER, "the sentinel was read as an answer"
+    assert not got.claims, "a refusal has nothing to check"
+    # A passage that merely mentions the words is not a refusal: the sentinel
+    # has to be the whole of its own line.
+    quoted = answer_from('the model was told to say "NO ANSWER IN PASSAGES" [1]', PASSAGES)
+    assert quoted.prose.strip() != NO_ANSWER

@@ -365,6 +365,13 @@ class SearchResult:
     # problems with different fixes.
     nothing_embedded: bool = False
     models: dict = field(default_factory=dict)
+    # How many candidates a cross-encoder rescored, 0 when none did. Reranking
+    # was the one optional stage that left no trace: routing set `routed`,
+    # expansion set `expansion`, summarising set `answer` and named its model,
+    # and a reranked search was indistinguishable afterwards from a plain one
+    # that happened to take thirty times as long. `dyp asked` recorded the same
+    # nothing, so the history could not say which answers had been reordered.
+    reranked: int = 0
 
 
 @dataclass
@@ -624,12 +631,15 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
         sides = [r for r in (vector_side, lexical_side) if r]
         shortlist = sides[0] if len(sides) == 1 else reciprocal_rank_fusion(sides, k=want)
 
+        rescored: list = []
         if reranker:
             say.check()
             working(f"rescoring {min(len(shortlist), want)} passages …")
             from dyprys.rerank import rerank
+            run.reranked = min(len(shortlist), want)
             shortlist = rerank(conn, reranker, question, shortlist[:want],
                                max(k * 4, k), say)
+            rescored = shortlist
         if dedupe:
             from dyprys.search import drop_near_duplicates
             shortlist = drop_near_duplicates(conn, shortlist, k)
@@ -640,8 +650,15 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
         # "phrase" and "words" rather than one "bm25": an exact-phrase hit and a
         # keyword-overlap hit are different kinds of answer, and the reader is
         # the one who knows which they wanted.
+        # The reranked order first, because it *is* the order on screen. Without
+        # it the top result read "vec 2 · words 7" -- true of where retrieval
+        # put it, and offered as the reason it is now first, which a
+        # cross-encoder decided. The frontend has carried a legend entry for
+        # this part ("a cross-encoder put it here") since before anything
+        # emitted one.
         run.why = provenance(
-            [n for n in (("vec", vector_side), ("bm25", lexical_side)) if n[1]],
+            [n for n in (("rerank", rescored), ("vec", vector_side),
+                         ("bm25", lexical_side)) if n[1]],
             found, rename={"bm25": origin})
         # Cosine for *every* result, including the ones only BM25 found — k dot
         # products against vectors already on disk. A literal match with a low
@@ -655,7 +672,7 @@ def _pipeline(conn, store, embedder, model_id, mode, books, router=None,
                 pass
         return found
 
-    run.why, run.cosine, run.expansion = {}, {}, None
+    run.why, run.cosine, run.expansion, run.reranked = {}, {}, None, 0
     return run
 
 
@@ -713,7 +730,8 @@ def _router(conn, directory, embedder, model_id, books_wanted, candidates):
     return go, advisories
 
 
-def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, cosine):
+def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, cosine,
+                    *, reranked: int = 0):
     """The `--json` payload, built from resolved passages and nothing else.
 
     Kept a pure function so it can be tested without a model or an index: it turns
@@ -744,6 +762,10 @@ def results_as_json(question, mode, routed, scanned, elapsed_ms, passages, why, 
         "query": question,
         "mode": mode,
         "routed": routed,
+        # How many candidates a cross-encoder rescored, 0 when none did. An
+        # agent reading this back could not otherwise tell a reranked answer
+        # from a plain one, and the two are worth different amounts.
+        "reranked": reranked,
         "scanned_fraction": round(scanned, 4),
         "elapsed_ms": round(elapsed_ms, 1),
         "results": results,
@@ -792,7 +814,7 @@ def summarise(session: Session, question: str, passages: list, model: str, *,
     and a frontend that hides them wastes the catch.
     """
     from dyprys import summarise as summarise_mod
-    from dyprys.summarise import NO_ANSWER, ask_ollama
+    from dyprys.summarise import ask_ollama
 
     say = progress or Silent()
     talk = talk or (lambda prompt: ask_ollama(model, prompt))
@@ -811,7 +833,7 @@ def summarise(session: Session, question: str, passages: list, model: str, *,
     # the first attempt works, and only ever runs when the alternative is
     # nothing at all. One retry: a model that cannot find it twice is telling
     # you something, and a loop here would spend minutes proving it.
-    if answer.prose.strip() == NO_ANSWER and run is not None:
+    if summarise_mod.refused(answer.prose) and run is not None:
         say.note("nothing here answers it — asking the same model for "
                  "other words")
         other = summarise_mod.rephrase(question, talk)
@@ -822,7 +844,7 @@ def summarise(session: Session, question: str, passages: list, model: str, *,
             again = resolve(session.conn, run(other, k))
             widened, spans = _widen(again)
             second = summarise_mod.summarise(question, widened, talk)
-            if second.prose.strip() != NO_ANSWER:
+            if not summarise_mod.refused(second.prose):
                 answer, passages, retried = second, again, other
             else:
                 failed = other
@@ -938,6 +960,7 @@ def search(session: Session, question: str, options: SearchOptions | None = None
     # these three, so reading them later reports the retry's provenance against
     # the passages the caller was actually given.
     why, cosine, expansion = dict(run.why), dict(run.cosine), run.expansion
+    reranked = run.reranked
     reached = router.last.get("books") if router else books
     share = scanned_fraction(conn, model_id, reached)
     passages = resolve(conn, hits)
@@ -966,6 +989,11 @@ def search(session: Session, question: str, options: SearchOptions | None = None
         ("embed", _shorten(embedder.name)),
         ("expander", getattr(expander, "model", None) if expander else None),
         ("summariser", answer.model if answer else None),
+        # The reranker names itself like every other model here and was simply
+        # never asked, so a reranked search recorded only what embedded it --
+        # and `dyp asked` could not say a cross-encoder had chosen the order,
+        # let alone which one.
+        ("reranker", getattr(reranker, "name", None) if reranker else None),
     ) if value}
 
     # Kept for the person, not for the search. A question worth asking twice
@@ -973,6 +1001,7 @@ def search(session: Session, question: str, options: SearchOptions | None = None
     # be findable again — `dyp asked`.
     db.record_question(conn, question, options.mode, elapsed, {
         "routed": bool(router),
+        "reranked": reranked or None,
         "books": len(reached) if reached else None,
         "models": models,
         "expansion": expansion or None,
@@ -987,7 +1016,7 @@ def search(session: Session, question: str, options: SearchOptions | None = None
         why=why, cosine=cosine, routed=bool(router), routed_books=reached,
         scanned_fraction=share, elapsed_ms=elapsed, expansion=expansion,
         answer=answer, warnings=list(warnings), nothing_embedded=nothing_embedded,
-        models=models)
+        models=models, reranked=reranked)
 
 
 # --------------------------------------------------------------------------
@@ -1136,7 +1165,8 @@ def check_payload(conn, deep: bool = False) -> dict:
         "lexical_chunks": report.lexical_chunks,
         "lexical_complete": report.lexical_chunks == report.live_chunks,
         "garbled": [
-            {"title": g.title, "chunks": g.chunks, "p90_token": g.p90_token}
+            {"title": g.title, "chunks": g.chunks, "p90_token": g.p90_token,
+             "key": g.key}
             for g in report.garbled],
         # Distinct from `garbled`: those have unusable text, these have none.
         "empty": [
@@ -1752,10 +1782,60 @@ def library_deletion(name: str) -> dict:
     from pathlib import Path
 
     files, size = registry.contents(entry.path)
+    sources = _sources_under(entry.path)
+    kept_files, kept_bytes = _kept_beside(entry.path)
     return {"name": entry.name, "path": str(entry.path),
             "exists": Path(entry.path).exists(),
-            "files": files, "bytes": size, "sources": _sources_under(entry.path),
+            "files": files, "bytes": size, "sources": sources,
+            # Whether the books are *in* the directory being emptied. On a
+            # library added in place they are, and then "the text is somewhere
+            # else" -- the sentence this preview existed to let someone check
+            # -- names the very directory it is about to remove. Said as a
+            # field rather than left to each frontend to work out, because two
+            # frontends working it out separately is how they came to promise
+            # different things about one irreversible button.
+            "shares_directory": _within(sources, entry.path),
+            "kept_files": kept_files, "kept_bytes": kept_bytes,
             "deleted": False}
+
+
+def _within(inner: str | None, outer) -> bool:
+    """Is `inner` `outer` itself, or below it?"""
+    from pathlib import Path
+
+    if not inner:
+        return False
+    try:
+        Path(inner).resolve().relative_to(Path(outer).resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _kept_beside(index_dir) -> tuple[int, int]:
+    """(files, bytes) that a deletion leaves behind in the index directory.
+
+    Zero on a library whose index has a directory to itself, which is what the
+    layout the docs describe produces. Non-zero says something else lives here
+    -- usually the books -- and it is worth counting rather than describing,
+    because the count is what makes "not touched" checkable.
+    """
+    from pathlib import Path
+
+    from dyprys import db
+
+    directory = Path(index_dir)
+    if not directory.is_dir():
+        return 0, 0
+    ours = {p.resolve() for p in db.artefacts(directory)}
+    files = size = 0
+    for path in directory.rglob("*"):
+        if not path.is_file() or any(p in ours for p in (path.resolve(),
+                                                         *path.resolve().parents)):
+            continue
+        files += 1
+        size += path.stat().st_size
+    return files, size
 
 
 def _sources_under(index_dir) -> str | None:
@@ -1783,21 +1863,42 @@ def _sources_under(index_dir) -> str | None:
 
 
 def delete_library(name: str, *, confirm: bool = False) -> dict:
-    """Erase a library's index directory and forget its name.
+    """Erase a library's index and forget its name.
 
     Unconfirmed this is the preview and deletes nothing, the same two-step
     `dyp remove` uses. The vectors go and cannot be recovered without embedding
     again; **the source text is not touched**, and the preview says where it is
     so that claim can be checked rather than believed.
+
+    It removes the index's own files -- `db.artefacts` -- and not the
+    directory holding them. That is the whole of the difference between a
+    promise and a guarantee: this was `shutil.rmtree(plan["path"])`, which is
+    right only when the index has the directory to itself, and silently deletes
+    every book when it does not. Two of the three libraries this was first run
+    against kept their text in the index directory, and for one of them the
+    confirmation offered "10 files, 249 MB" over 238 files and 225 books.
+
+    The directory itself goes only when emptying it emptied it: an index that
+    had a directory to itself still leaves nothing behind, and one that shared
+    leaves exactly what it never owned.
     """
     import shutil
+    from pathlib import Path
 
-    from dyprys import registry
+    from dyprys import db, registry
 
     plan = library_deletion(name)
     if not confirm:
         return plan
-    shutil.rmtree(plan["path"], ignore_errors=True)
+    for artefact in db.artefacts(plan["path"]):
+        if artefact.is_dir():
+            shutil.rmtree(artefact, ignore_errors=True)
+        else:
+            artefact.unlink(missing_ok=True)
+    try:
+        Path(plan["path"]).rmdir()
+    except OSError:
+        pass                     # something else lives here; it is not ours
     registry.remove(plan["name"])
     plan["deleted"] = True
     plan["libraries"] = libraries_payload()["libraries"]

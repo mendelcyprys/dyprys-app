@@ -390,6 +390,11 @@ def test_deleting_an_index_over_http_previews_first(client, index):
     assert plan["deleted"] is False
     assert plan["files"] > 0
     assert Path(directory).exists()
+    # What a browser draws its two panels from. `shares_directory` decides
+    # which sentence goes under "Kept", and it read "they are somewhere else"
+    # over the deleted path itself until the server started saying.
+    assert plan["shares_directory"] in (True, False)
+    assert plan["kept_files"] >= 0 and plan["kept_bytes"] >= 0
 
 
 # --------------------------------------------------------------------------

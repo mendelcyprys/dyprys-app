@@ -236,8 +236,37 @@ def render(passages: list) -> str:
     )
 
 
+def refused(prose: str) -> bool:
+    """Did the model say the passages do not answer the question?
+
+    The sentinel on a line of its own, rather than as the whole of the output.
+    `prose.strip() == NO_ANSWER` was the test in two places -- the retry in
+    `service` and the refusal panel in the browser -- and a model that obeys
+    the instruction *and* keeps talking defeats both at once. Asking a real
+    library "fairness opinion" produced:
+
+        Goldman Sachs advised the Special Committee of Cox Communications. [2]
+
+        NO ANSWER IN PASSAGES
+
+    which was read as an answer. So the rephrase-and-try-again that
+    `--summarise` is documented to do never ran, and the token itself was
+    rendered to the reader as prose. A model that emits it at all is saying it
+    could not answer; that reading is also the safe one, because the retry
+    costs nothing when the first attempt was fine.
+    """
+    return any(line.strip() == NO_ANSWER for line in prose.splitlines())
+
+
 def answer_from(text: str, passages: list) -> Answer:
-    """Turn a generation into a checked answer.  Pure: no model, no index."""
+    """Turn a generation into a checked answer.  Pure: no model, no index.
+
+    A refusal is normalised to the bare sentinel, so every caller that has to
+    recognise one -- and there is one in each frontend -- can do it by equality
+    and none of them can drift from this rule.
+    """
+    if refused(text):
+        return Answer(prose=NO_ANSWER, claims=[])
     claims = verify(find_claims(text), passages)
     rejected = [c for c in claims if not c.verified]
     return Answer(prose=redact(text, rejected), claims=claims)

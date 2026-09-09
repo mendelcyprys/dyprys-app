@@ -221,8 +221,12 @@ whether the embedding survives:
 | library | `dyp library remove NAME` | `dyp library remove NAME --delete --yes` |
 
 **No source text is ever deleted by any of them** — the right column removes the
-index's memory of the books, or the index directory, and never the files.
-Prefer the left column: it costs nothing, and it is one command back.
+index's memory of the books, or the index's own files, and never the text.
+`--delete` removes what the index wrote (the database, the vectors, the routing
+profile) rather than the directory holding them, so it is safe on a library
+whose index sits in the same directory as its books; it says which case it is in
+and how much stays. Prefer the left column anyway: it costs nothing, and it is
+one command back.
 
 → **`docs/indexing.md`** (add, embed, model choice, detecting bad extraction),
 **`docs/libraries.md`** (registry, several models, backup/restore, moving),
@@ -280,7 +284,9 @@ can drive both searching and administration structurally:
 state, text}`. `book` is the name someone gave the book if they gave one and the
 derived title otherwise; `book_note` is what they wrote about it, usually null —
 read it, it is there because something about that book is worth knowing.
-`provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`); `text` is `null` when
+`provenance` is the rank signal (e.g. `"vec 1 · phrase 1"`, and `"rerank 1 · vec
+2"` when a cross-encoder chose the order — the top-level `reranked` counts what
+it rescored); `text` is `null` when
 the passage could not be proved against its stored hash, and `state` says why —
 **never quote a passage whose `text` is null**. Full schema in `docs/searching.md`.
 

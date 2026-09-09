@@ -1,4 +1,4 @@
-import { AlertTriangle, PlugZap } from "lucide-react";
+import { AlertTriangle, Loader2, PlugZap } from "lucide-react";
 import { RegisterLibrary } from "@/rail/register-library";
 
 /**
@@ -32,6 +32,14 @@ export function ServerUnreachable() {
       <pre className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs">
         dyp serve --port 8765
       </pre>
+      {/* The claim above is a promise about behaviour, so it is worth being
+          able to see it being kept. `useLibraries` polls while it is failing
+          and stops the moment it is not; without this line, a page that really
+          is retrying looks identical to one that gave up — which is what it
+          used to be. */}
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" /> checking every few seconds
+      </p>
     </Screen>
   );
 }

@@ -48,7 +48,11 @@ export function Results({
 
       <p className="pt-2 text-[11px] text-muted-foreground">
         {answered.results.length} passages · {answered.mode}
-        {answered.routed && " · routed"} · read{" "}
+        {answered.routed && " · routed"}
+        {/* Reranking is almost all of the elapsed time when it runs, and this
+            line named routing and not it — so the reader had no way, after the
+            fact, to tell a reordered answer from a plain one. */}
+        {answered.reranked > 0 && ` · ${answered.reranked} rescored`} · read{" "}
         {(answered.scanned_fraction * 100).toFixed(answered.scanned_fraction < 0.01 ? 2 : 0)}% of
         the library · {(answered.elapsed_ms / 1000).toFixed(1)}s
       </p>
@@ -163,7 +167,13 @@ function Passage({
       )}
 
       {proved ? (
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed">{result.text}</p>
+        // Capped, not full-bleed. A passage is a few thousand bytes of book and
+        // the pane is as wide as the window: at 1440px an uncapped line ran to
+        // roughly 200 characters, which is two and a half times the width
+        // anything meant to be read is set at.
+        <p className="mt-3 max-w-[80ch] whitespace-pre-wrap text-sm leading-relaxed">
+          {result.text}
+        </p>
       ) : (
         <p className="mt-3 flex items-start gap-2 text-sm text-muted-foreground">
           <FileWarning className="mt-0.5 size-4 shrink-0" />
@@ -211,7 +221,12 @@ function explain(part: string): string {
  * because a citation has to point at something the reader can see.
  */
 function Drafted({ answer, onRead }: { answer: Answer; onRead: (reading: Reading) => void }) {
-  const refused = answer.prose.trim() === "NO ANSWER IN PASSAGES";
+  // The sentinel on a line of its own, not as the whole of the answer. The
+  // server normalises a refusal to the bare token, so equality would do — but
+  // this is the reader-facing half of the same rule, and when the two halves
+  // disagreed the token itself was rendered as prose under a model that had
+  // just said it could not answer.
+  const refused = answer.prose.split("\n").some((line) => line.trim() === "NO ANSWER IN PASSAGES");
 
   if (refused) {
     return (
@@ -260,7 +275,7 @@ function Drafted({ answer, onRead }: { answer: Answer; onRead: (reading: Reading
         </div>
       )}
 
-      <p className="whitespace-pre-wrap text-sm leading-relaxed">{answer.prose}</p>
+      <p className="max-w-[80ch] whitespace-pre-wrap text-sm leading-relaxed">{answer.prose}</p>
 
       {answer.verified.length > 0 && (
         <div className="mt-4 space-y-1.5 border-t pt-3">

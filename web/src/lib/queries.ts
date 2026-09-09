@@ -8,7 +8,20 @@ export const keys = {
 };
 
 export function useLibraries() {
-  return useQuery({ queryKey: keys.libraries, queryFn: api.libraries });
+  return useQuery({
+    queryKey: keys.libraries,
+    queryFn: api.libraries,
+    // The blocked screen says "Start one and it will connect on its own", and
+    // nothing here made that true: no interval, `refetchOnWindowFocus: false`
+    // globally, and `retry` capped at two attempts a second apart. Starting
+    // the server left the page on that screen until someone reloaded it, which
+    // is the one instruction the screen does not give.
+    //
+    // Polled only while it is failing, so a working app pays nothing: this is
+    // a reconnect, not a heartbeat.
+    refetchInterval: (query) => (query.state.error ? 3_000 : false),
+    refetchIntervalInBackground: false,
+  });
 }
 
 export function useHealth() {

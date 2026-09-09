@@ -123,10 +123,13 @@ dyp lexical    # rebuild the keyword index from source files (rarely needed)
 | `dyp compact` | dead passage ids, the tail of each vector file | every live vector |
 | `dyp models --drop NAME` | one model, its vectors, its profile | books, passages, keyword index, other models |
 | `dyp library remove NAME` | the registry name only | everything; still opens with `--data` |
-| `dyp library remove --delete` | the index directory | the source text |
+| `dyp library remove --delete` | the index's own files — database, vectors, profile | the source text, and anything else in that directory |
 
 **Nothing here deletes a source file.** Text is read by seek and never copied in,
-so no command owns it.
+so no command owns it. `--delete` used to take the whole registered directory,
+which broke that rule on any library indexed in place — it now names the files
+it wrote and removes only those, and drops the directory only if emptying it
+emptied it.
 
 ## The record of what has happened
 

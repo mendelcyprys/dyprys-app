@@ -987,17 +987,26 @@ def _library(args, parser) -> int:
             # the drift that makes a browser and a terminal promise different
             # things about the same irreversible button.
             plan = service.library_deletion(args.name)
-            print(f"this would delete {plan['path']}")
-            print(f"  {plan['files']} file(s), {_size(plan['bytes'])} — the index, its "
+            print(f"this would delete the index in {plan['path']}")
+            print(f"  {plan['files']} file(s), {_size(plan['bytes'])} — the database, its "
                   f"vectors and its routing profile")
-            if plan["sources"]:
+            # Which sentence is true depends on the layout, and printing the
+            # wrong one is how this line came to say "the text is elsewhere,
+            # e.g. <the directory being deleted>".
+            if plan["shares_directory"]:
+                print(f"  the text is in that same directory and is NOT touched — "
+                      f"{plan['kept_files']} file(s), {_size(plan['kept_bytes'])} stay, "
+                      f"including {plan['sources']}")
+            elif plan["sources"]:
                 print(f"  the text itself is elsewhere and is NOT touched, "
                       f"e.g. {plan['sources']}")
             if not args.yes:
                 print("\nre-run with --yes to go ahead.", file=sys.stderr)
                 return 1
             service.delete_library(args.name, confirm=True)
-            print(f"deleted {plan['path']} and forgot {args.name}")
+            print(f"deleted the index in {plan['path']} and forgot {args.name}")
+            if plan["kept_files"]:
+                print(f"  {plan['kept_files']} file(s) left where they were")
             return 0
 
         registry.remove(args.name)
@@ -1197,7 +1206,9 @@ def _asked(conn, args) -> int:
         detail = json.loads(row["detail"])
         print(f"{term.bold(row['question'])}")
         print(term.dim(f"  {_local(row['at'])} · {row['mode']} · {row['ms']:.0f} ms"
-                       + (f" · {detail['books']} routed books" if detail.get("books") else "")))
+                       + (f" · {detail['books']} routed books" if detail.get("books") else "")
+                       + (f" · {detail['reranked']} rescored"
+                          if detail.get("reranked") else "")))
         for role, name in (detail.get("models") or {}).items():
             print(term.dim(f"  {role}: {name}"))
         for kind, lines in (detail.get("expansion") or {}).items():
@@ -1230,6 +1241,11 @@ def _asked(conn, args) -> int:
         detail = json.loads(row["detail"])
         marks = "".join((
             "r" if detail.get("routed") else "",
+            # `c` for cross-encoder: `r` is routing's, and the two are the
+            # optional stages most worth telling apart when reading back a
+            # question -- one changed which books were read, the other changed
+            # the order of what came out.
+            "c" if detail.get("reranked") else "",
             "e" if detail.get("expansion") else "",
             "s" if detail.get("answer") else "",
         ))
@@ -1241,7 +1257,7 @@ def _asked(conn, args) -> int:
         ms = f"{row['ms']:>8.0f}"
         print(f"{term.dim(number)}  {term.dim(when)}{term.dim(ms)}   "
               f"{row['question'][:56]} {term.dim(marks)}")
-    print(term.dim("\n  r routed · e expanded · s summarised"))
+    print(term.dim("\n  r routed · c cross-encoder reranked · e expanded · s summarised"))
     print(term.dim(f"  `dyp asked N` for one in full · `dyp asked --forget all`"))
     return 0
 
@@ -1447,7 +1463,7 @@ def _ask(conn, directory, args) -> int:
         import json as _json
         payload = results_as_json(
             result.question, result.mode, result.routed, result.scanned_fraction,
-            result.elapsed_ms, passages, why, cosine)
+            result.elapsed_ms, passages, why, cosine, reranked=result.reranked)
         print(_json.dumps(payload, ensure_ascii=False, indent=2))
         return 0 if payload["results"] else 1
 
@@ -1518,7 +1534,12 @@ def _ask(conn, directory, args) -> int:
         scope = f"{len(reached)} book(s), {result.scanned_fraction:.1%} of the vectors"
     else:
         scope = "the whole embedded corpus"
-    print(f"\n{result.elapsed_ms:.1f} ms, {args.mode} over {scope}", file=sys.stderr)
+    # Reranking is most of the elapsed time whenever it ran, and this line was
+    # silent about it while naming routing — so a 25-second search and a
+    # 0.2-second one printed the same sentence.
+    rescored = f", {result.reranked} rescored" if result.reranked else ""
+    print(f"\n{result.elapsed_ms:.1f} ms, {args.mode} over {scope}{rescored}",
+          file=sys.stderr)
     return 0
 
 
@@ -1688,7 +1709,7 @@ def _show_answer(summary) -> None:
     result; this is a reading of them, and a reading that cannot be verified is
     worth less than the list it was drawn from.
     """
-    from dyprys.summarise import NO_ANSWER
+    from dyprys.summarise import refused
 
     answer, widened, spans = summary.answer, summary.widened, summary.spans
     print("\n" + term.rule())
@@ -1705,7 +1726,7 @@ def _show_answer(summary) -> None:
         print(f"{summary.model} returned nothing; the passages above are unaffected.",
               file=sys.stderr)
         return
-    if answer.prose.strip() == NO_ANSWER:
+    if refused(answer.prose):
         print("the model reports that these passages do not answer the question.")
         if summary.failed:
             print(term.dim(f"  it was asked again for \u201c{summary.failed}\u201d, "

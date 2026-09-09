@@ -279,3 +279,46 @@ def test_the_template_falls_back_to_the_declared_architecture(tmp_path):
     assert template_for(tmp_path / "cross-encoder-q8.gguf", "jina-bert-v2") == "bge"
     assert template_for(tmp_path / "cross-encoder-q8.gguf", "qwen3") == "qwen3"
     assert template_for(tmp_path / "cross-encoder-q8.gguf") == "qwen3"
+
+
+def test_a_reranked_search_says_so_afterwards(tmp_path):
+    """The stage that ran and left no trace.
+
+    Routing set `routed`, expansion set `expansion`, summarising set `answer`
+    and named its model. Reranking -- which is almost the whole of the elapsed
+    time whenever it happens, 25.7s against 0.2s of retrieval at depth 20 --
+    set nothing. So a finished search could not say a cross-encoder had chosen
+    its order, `dyp asked` recorded a reordered answer identically to a plain
+    one, and the top result's `vec 2 · words 7` was offered as the reason it
+    was first when retrieval had put it second.
+    """
+    from dyprys import service
+    from tests.indexes import embedded_index, write_books
+
+    books = write_books(tmp_path / "lib")
+    conn, embedder, model_id, store = embedded_index(tmp_path / "ix", books)
+    conn.close()
+    with service.open_session(
+            data=tmp_path / "ix",
+            load_model=lambda *a, **k: (embedder, model_id, store)) as session:
+        plain = service.search(session, "neurons", service.SearchOptions())
+        result = service.search(session, "neurons", service.SearchOptions(
+            rerank=5, reranker=StubReranker()))
+
+    assert plain.reranked == 0
+    assert result.reranked > 0, "a reranked search looked exactly like a plain one"
+    # Named, not just counted: which cross-encoder ordered it is the part that
+    # makes the ordering reproducible. `Reranker.name` existed all along and
+    # this dict never asked for it.
+    assert "reranker" in result.models
+
+    payload = service.results_as_json(
+        result.question, result.mode, result.routed, result.scanned_fraction,
+        result.elapsed_ms, result.passages, result.why, result.cosine,
+        reranked=result.reranked)
+    assert payload["reranked"] == result.reranked
+
+    # And the rank signal explains the order actually on screen. The frontend
+    # has carried a legend line for a `rerank` part -- "a cross-encoder put it
+    # here" -- since before anything emitted one.
+    assert any("rerank" in why for why in result.why.values())

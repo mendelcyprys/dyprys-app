@@ -180,6 +180,11 @@ export interface IndexDeletion {
   bytes: number;
   /** Where the text lives. Not touched — this is here so that is checkable. */
   sources: string | null;
+  /** The books are inside the directory being emptied, so "somewhere else" is false. */
+  shares_directory: boolean;
+  /** What the deletion leaves behind in that directory, counted rather than promised. */
+  kept_files: number;
+  kept_bytes: number;
   deleted: boolean;
 }
 
@@ -301,6 +306,8 @@ export interface Answered {
   query: string;
   mode: string;
   routed: boolean;
+  /** Candidates a cross-encoder rescored, 0 when none did. */
+  reranked: number;
   scanned_fraction: number;
   elapsed_ms: number;
   results: Result[];
@@ -395,6 +402,8 @@ export interface BookFault {
   chunks: number;
   /** 90th-percentile token length. High means word boundaries were lost. */
   p90_token?: number;
+  /** What to act on. Titles collide; this is what `-c` and every mutation take. */
+  key?: string;
 }
 
 export interface Check {

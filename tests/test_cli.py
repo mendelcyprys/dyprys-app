@@ -950,3 +950,32 @@ def test_history_and_asked_emit_valid_json(tmp_path, capsys):
     code, asked = _run_capturing(["--data", data, "asked", "--json"], capsys)
     assert code == 0
     assert asked == {"questions": []}
+
+
+def test_the_delete_preview_says_where_the_text_is_only_when_it_is_elsewhere(
+        tmp_path, monkeypatch, capsys):
+    """The line that contradicted itself.
+
+    It printed "the text itself is elsewhere and is NOT touched, e.g. <path>"
+    unconditionally, so on a library indexed in place the path it named as
+    elsewhere was the directory it was about to remove. Which sentence is true
+    depends on the layout, so the preview has to choose between them -- and
+    without `--yes` it must print and change nothing either way.
+    """
+    from dyprys import registry
+    from dyprys.cli import main
+    from tests.indexes import embedded_index, write_books
+
+    inside = tmp_path / "texts"
+    books = write_books(inside)
+    conn, *_ = embedded_index(inside, books)
+    conn.close()
+    entry = type("L", (), {"name": "inplace", "path": inside, "exists": True})()
+    monkeypatch.setattr(registry, "libraries", lambda: [entry])
+
+    assert main(["library", "remove", "inplace", "--delete"]) == 1, "no --yes must refuse"
+    said = capsys.readouterr().out
+
+    assert "the text is in that same directory and is NOT touched" in said
+    assert "elsewhere" not in said
+    assert all(book.exists() for book in books), "a preview deleted something"

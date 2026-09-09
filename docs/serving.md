@@ -87,6 +87,15 @@ where the text lives, which is **not** touched. Both previews are built by the
 same service functions the terminal prints from, so a browser and a terminal
 cannot describe the same irreversible act differently.
 
+**`/index` deletes the index’s own files, not the directory holding them**, and
+says which case it is in: `shares_directory` is true when the books live in that
+same directory, with `kept_files` and `kept_bytes` counting what stays. It was
+`rmtree` on the registered path, which is correct only when the index has the
+directory to itself — a library added in place keeps its books there, and the
+call took all of them while the response said `sources` was untouched. A client
+rendering "the text is somewhere else" must read `shares_directory` first; the
+number beside it is what makes the claim checkable.
+
 `DELETE /libraries/{name}/index` deliberately had no route for a while, on the
 grounds that a browser is the wrong place to confirm days of embedding away. The
 preview is that confirmation; what a browser must not have is a single unguarded
@@ -135,11 +144,10 @@ browser:
   rather than `registry.add`'s silent overwrite, which over HTTP is a lost
   library.
 
-`DELETE` forgets the name and touches nothing on disk. The CLI's
-`--delete`, which erases the index directory, deliberately has **no route**:
-over HTTP that is one misclick from days of embedding, and a terminal is the
-right place to confirm it. Deleting also drops the library's warm session,
-because the name has stopped meaning that directory.
+`DELETE` forgets the name and touches nothing on disk; erasing the index itself
+is `DELETE /libraries/{name}/index`, previewed and confirmed as above. Either
+drops the library's warm session, because the name has stopped meaning that
+directory.
 
 ## Searching
 
@@ -185,6 +193,12 @@ each says something a reader cannot otherwise recover:
   own words before giving up. A refusal that survived that is strong evidence
   the library lacks the answer; one that was never rephrased is not, and stored
   prose reading `NO ANSWER IN PASSAGES` looks identical either way.
+
+  A refusal always *is* exactly that string: the server normalises it, because
+  models emit the sentinel with an answer above it and every consumer of this
+  field was testing `prose == "NO ANSWER IN PASSAGES"`. Recognising a refusal
+  only when it was the whole output meant the retry never ran and the token was
+  rendered to a reader as prose. Test for equality; the server guarantees it.
 - **`retried`** — the rephrasing that worked.
 - **`drawn_from`** — present only after a successful retry, and then it matters
   a great deal: the answer is about the *retry's* passages while `results` still

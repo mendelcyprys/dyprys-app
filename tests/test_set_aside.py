@@ -328,4 +328,51 @@ def test_deleting_a_library_previews_before_it_destroys(tmp_path, monkeypatch):
     # a promise. It is a different directory from the index, which is the fact
     # that makes the promise true.
     assert plan["sources"] == str(tmp_path / "lib")
+    assert plan["shares_directory"] is False
+    assert plan["kept_files"] == 0, "a dedicated index directory leaves nothing behind"
     assert (tmp_path / "ix").exists()
+
+
+def test_deleting_a_library_never_takes_the_books_with_it(tmp_path, monkeypatch):
+    """The layout on which "the text is somewhere else" is simply false.
+
+    `dyp library add x ~/texts` followed by `dyp add ~/texts` puts the index in
+    the directory holding the books. It is an ordinary thing to do -- two of
+    the three libraries this was first run against were built that way -- and
+    deleting the index was `shutil.rmtree` on the registered path, which took
+    every book with it. Both frontends meanwhile printed the opposite: the
+    terminal said "the text itself is elsewhere and is NOT touched, e.g. <that
+    same directory>", and the browser drew the one path under **Deleted** and
+    again under **Kept**.
+
+    So this asserts the guarantee rather than the wording. A deletion removes
+    what the index wrote and nothing else, on any layout, and the count it
+    offers for confirmation is a count of that and not of the directory.
+    """
+    from dyprys import registry
+
+    inside = tmp_path / "texts"
+    books = write_books(inside)
+    conn, *_ = embedded_index(inside, books)          # the index, beside the books
+    conn.close()
+    entry = type("L", (), {"name": "inplace", "path": inside, "exists": True})()
+    monkeypatch.setattr(registry, "libraries", lambda: [entry])
+    monkeypatch.setattr(registry, "remove", lambda name: True)
+
+    plan = service.library_deletion("inplace")
+    assert plan["shares_directory"] is True
+    # The books are what stays, and they are counted -- "not touched" is only
+    # checkable against a number.
+    assert plan["kept_files"] == len(books)
+    assert plan["kept_bytes"] == sum(book.stat().st_size for book in books)
+    # ...and they are not also counted as the index. That was the other half of
+    # the same mistake: 249 MB offered for 347 MB, or a library's own books
+    # described as "its vectors and its routing profile".
+    assert plan["files"] == len(db.artefacts(inside))
+
+    service.delete_library("inplace", confirm=True)
+
+    assert all(book.exists() for book in books), "the books were deleted"
+    assert inside.is_dir(), "the directory holding them went too"
+    assert not db.index_exists(inside)
+    assert not list(inside.glob("*.f32"))

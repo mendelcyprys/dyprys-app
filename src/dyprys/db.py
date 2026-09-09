@@ -97,6 +97,45 @@ def index_exists(directory: Path) -> bool:
         return True
     return bool(_index_candidates(directory))
 
+
+def artefacts(directory: Path) -> list[Path]:
+    """Every path in `directory` that this index put there.
+
+    Named rather than inferred, because the alternative -- treating the
+    directory *as* the index -- is only correct when nothing else lives in it.
+    A library added in place (`dyp library add x ~/texts`, then `dyp add
+    ~/texts`) keeps its books in that same directory, and removing the
+    directory there takes the books with it while the confirmation is still
+    saying the text is somewhere else. Deleting only what we wrote is the one
+    version of "delete the index" that cannot do that, on any layout.
+
+    Ordered so the database goes last: an interrupted removal then leaves the
+    file that still says what the missing vectors belonged to.
+    """
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    try:
+        databases = [db_path(directory)]
+    except ValueError:
+        # Two indexes in one directory. `db_path` refuses to choose between
+        # them; both are still ours, and a removal names both.
+        databases = _index_candidates(directory)
+
+    found = sorted(directory.glob("*.f32")) + sorted(directory.glob(".*.lock"))
+    jobs = directory / ".jobs"
+    if jobs.is_dir():
+        found.append(jobs)
+    for database in databases:
+        # The sidecars by name rather than by glob: `dyprys.sqlite-wal` is ours
+        # and `notes.sqlite-wal` next to it is not.
+        found += [p for p in (database,
+                              database.with_name(database.name + "-shm"),
+                              database.with_name(database.name + "-wal"),
+                              database.with_name(database.name + "-journal"))
+                  if p.exists()]
+    return found
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,

@@ -141,6 +141,7 @@ export function LibraryPicker({
                         size="icon"
                         variant="ghost"
                         className="size-6"
+                        aria-label={`make ${row.name} the default library`}
                         onClick={(event) => {
                           event.stopPropagation();
                           makeDefault.mutate(row.name);
@@ -153,12 +154,18 @@ export function LibraryPicker({
                   {/* Two removals, and the difference between them is the
                       whole reason they are two buttons. Forgetting a name
                       touches nothing on disk and is undone by adding the same
-                      path again; deleting the index destroys the vectors. */}
+                      path again; deleting the index destroys the vectors.
+
+                      Each carries an `aria-label` as well as a tooltip: a
+                      tooltip is a hover affordance and not an accessible name,
+                      so without one these read as three unnamed buttons — next
+                      to each other, and one of them irreversible. */}
                   <Tooltip label="forget the name — nothing on disk is touched, and adding the same path again brings it all back">
                     <Button
                       size="icon"
                       variant="ghost"
                       className="size-6 text-muted-foreground hover:text-foreground"
+                      aria-label={`forget the name ${row.name}, keeping its files`}
                       onClick={(event) => {
                         event.stopPropagation();
                         forget.mutate(row.name, {
@@ -175,6 +182,7 @@ export function LibraryPicker({
                         size="icon"
                         variant="ghost"
                         className="size-6 text-muted-foreground hover:text-destructive"
+                        aria-label={`delete the ${row.name} index`}
                         onClick={(event) => {
                           event.stopPropagation();
                           setDeleting(row.name);
